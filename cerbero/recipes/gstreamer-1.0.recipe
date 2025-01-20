@@ -1,0 +1,78 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+import shutil
+
+class Recipe(custom.GStreamer):
+    name = 'gstreamer-1.0'
+    btype = BuildType.MESON
+    tarball_checksum = '0545b030960680f71a95f9d39c95daae54b4d317d335e8f239d81138773c9b90'
+    deps = ['glib']
+    bash_completions = ['gst-inspect-1.0', 'gst-launch-1.0']
+
+    files_bins = ['gst-inspect-1.0',
+                  'gst-typefind-1.0',
+                  'gst-launch-1.0']
+
+    files_libs = ['libgstbase-1.0', 'libgstcontroller-1.0',
+                  'libgstnet-1.0', 'libgstreamer-1.0', 'libgstcheck-1.0']
+
+    files_plugins_core = [
+        'lib/gstreamer-1.0/libgstcoreelements%(mext)s',
+        'lib/gstreamer-1.0/libgstcoretracers%(mext)s'
+    ]
+    files_plugins_core_devel = [
+        'lib/gstreamer-1.0/libgstcoreelements.a', 'lib/gstreamer-1.0/libgstcoreelements.la',
+        'lib/gstreamer-1.0/libgstcoretracers.a', 'lib/gstreamer-1.0/libgstcoretracers.la',
+    ]
+
+    files_misc = ['libexec/gstreamer-1.0/gst-plugin-scanner%(bext)s']
+
+    platform_files_misc = {
+        Platform.LINUX: ['libexec/gstreamer-1.0/gst-ptp-helper%(bext)s'],
+        Platform.DARWIN: ['libexec/gstreamer-1.0/gst-ptp-helper%(bext)s'],
+    }
+
+    files_devel = [
+            'include/gstreamer-1.0/gst/*.h',
+            'include/gstreamer-1.0/gst/base',
+            'include/gstreamer-1.0/gst/check',
+            'include/gstreamer-1.0/gst/controller',
+            'include/gstreamer-1.0/gst/net',
+            'lib/pkgconfig/gstreamer-1.0.pc',
+            'lib/pkgconfig/gstreamer-check-1.0.pc',
+            'lib/pkgconfig/gstreamer-base-1.0.pc',
+            'lib/pkgconfig/gstreamer-controller-1.0.pc',
+            'lib/pkgconfig/gstreamer-net-1.0.pc',
+    ]
+
+    files_lang = ['gstreamer-1.0']
+
+    files_typelibs = [
+        'Gst-1.0',
+        'GstBase-1.0',
+        'GstCheck-1.0',
+        'GstController-1.0',
+        'GstNet-1.0'
+        ]
+
+
+    def prepare(self):
+        if self.config.target_platform == Platform.IOS:
+            # iOS only supports static builds so plugins must be linked
+            # and registered statically.
+            self.meson_options['registry'] = 'false'
+
+        if self.config.variants.nodebug:
+            self.append_env('CFLAGS', '-DGST_LEVEL_MAX=GST_LEVEL_FIXME')
+
+        if self.config.variants.unwind:
+            self.deps += ['libunwind']
+            self.meson_options['libunwind'] = 'enabled'
+        else:
+            self.meson_options['libunwind'] = 'disabled'
+
+        if self.using_msvc():
+            if self.config.variants.uwp:
+                # Most symbols in DbgHelp.h are not allowed for UWP
+                self.meson_options['dbghelp'] = 'disabled'
+            else:
+                self.meson_options['dbghelp'] = 'enabled'

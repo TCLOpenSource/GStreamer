@@ -1,0 +1,27 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+class Recipe(recipe.Recipe):
+    name = 'ninja'
+    version = '1.10.0'
+    licenses = [License.Apachev2]
+    btype = BuildType.CUSTOM
+    stype = SourceType.TARBALL
+    url = 'https://github.com/ninja-build/ninja/archive/v%(version)s.tar.gz'
+    tarball_checksum = '3810318b08489435f8efc19c05525e80a993af5a55baa0dfeae0465a9d45f99f'
+    patches = ['ninja/0001-configure.py-Look-for-cl.exe-before-assuming-MSVC.patch']
+
+    files_bin = ['bin/ninja']
+
+    def configure(self):
+        shell.new_call([self.config.python_exe, 'configure.py', '--bootstrap', '--verbose'],
+                       self.build_dir, logfile=self.logfile, env=self.env)
+
+    async def install(self):
+        ninja = 'ninja'
+        if self.platform == Platform.WINDOWS:
+            ninja += '.exe'
+        bindir = os.path.join (self.config.prefix, "bin")
+        if not os.path.exists(bindir):
+            os.makedirs(bindir)
+        os.replace(os.path.join(self.build_dir, ninja),
+                   os.path.join(bindir, ninja))

@@ -1,0 +1,44 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+from cerbero.tools.libtool import LibtoolLibrary
+import shutil
+
+class Recipe(recipe.Recipe):
+    name = 'libsrtp'
+    version = '2.3.0'
+    stype = SourceType.TARBALL
+    url = 'https://github.com/cisco/%(name)s/archive/v%(version)s.tar.gz'
+    tarball_checksum = '94093a5d04c5f4743e8d81182b76938374df6d393b45322f24960d250b0110e8'
+    licenses = [{License.BSD_like: ['LICENSE']}]
+
+    btype = BuildType.MESON
+    meson_options = {
+        # XXX: should we use openssl?
+        'crypto-library': 'none',
+        'doc': 'disabled',
+        'tests': 'enabled',
+        'pcap-tests': 'disabled'
+    }
+
+    patches = [
+        # https://github.com/cisco/libsrtp/pull/495
+        'libsrtp/libsrtp-meson-port.patch',
+        'libsrtp/0001-meson-Fix-check-for-size_t-on-MSVC.patch',
+        # https://github.com/cisco/libsrtp/pull/486
+        'libsrtp/0001-Fix-building-with-gcc-10.patch',
+    ]
+
+    files_libs = ['libsrtp2']
+    files_devel = ['include/srtp2', 'lib/pkgconfig/libsrtp2.pc']
+
+    async def install(self):
+        await super(Recipe, self).install()
+        libdir = os.path.join(self.config.prefix,
+                              'lib' + self.config.lib_suffix)
+        shutil.copy(os.path.join(self.build_dir, 'srtp.def'), libdir)
+
+    def post_install(self):
+        libtool_la = LibtoolLibrary('srtp2', None, None, None, self.config.libdir,
+                                    self.config.target_platform)
+        libtool_la.save()
+        super().post_install()

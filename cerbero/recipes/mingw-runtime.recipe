@@ -1,0 +1,133 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+import shutil
+
+
+class Recipe(recipe.Recipe):
+    name = 'mingw-runtime'
+    version = '0.1'
+    licenses = [License.LGPLv2_1Plus]
+    licenses_bins = [License.GPLv2Plus]
+    btype = BuildType.CUSTOM
+    stype = SourceType.CUSTOM
+    runtime_dep = True
+
+    files_bins = []
+    files_libs = ['libwinpthread-1', 'libstdc++-6']
+    files_devel = ['lib/libstdc++.a', 'lib/libstdc++.la']
+    files_static = []
+    files_headers = ['include/GL']
+
+    def prepare(self):
+        if self.config.target_platform != Platform.WINDOWS:
+            raise InvalidRecipeError(self, "Invalid platform")
+        if self.config.variants.uwp:
+            self.runtime_dep = False
+        if self.config.target_arch == Architecture.X86:
+            gcclib = 'lib/gcc/x86_64-w64-mingw32/8.2.0/32/'
+            self._ehlib = 'libgcc_s_sjlj-1'
+        else:
+            gcclib = 'lib/gcc/x86_64-w64-mingw32/8.2.0/'
+            self._ehlib = 'libgcc_s_seh-1'
+
+        # mingw's static libraries
+        self.mingw_static_files = ['libmingwex.a',
+                                   'libdxerr9.a',
+                                   'libmoldname.a']
+        self.gcc_static_files = [gcclib + 'libgcc.a',
+                                 gcclib + 'libgcc_eh.a']
+        self.files_static += [os.path.join('lib', os.path.basename(f)) \
+                for f in self.mingw_static_files + self.gcc_static_files]
+
+        self.files_libs.append(self._ehlib)
+        if self.config.platform == Platform.WINDOWS and \
+           self.config.prefix != self.config.build_tools_prefix:
+            self.files_bins += ['pkg-config']
+
+    async def install(self):
+        hostroot = os.path.join(self.config.toolchain_prefix, 'x86_64-w64-mingw32')
+        sysroot = os.path.join(hostroot, 'sysroot', 'usr', 'x86_64-w64-mingw32')
+        # Copy libstdc++ to the prefix and update the .la files with the
+        # the prefix path.
+        if self.config.target_arch == Architecture.X86:
+            libmingw = os.path.join(sysroot, 'lib32')
+            if self.config.platform == Platform.WINDOWS:
+                libdir = os.path.join(self.config.toolchain_prefix, 'lib32')
+            else:
+                libdir = os.path.join(hostroot, 'lib32')
+        else:
+            libtoolchain = os.path.join(hostroot, 'lib')
+            libmingw = os.path.join(sysroot, 'lib')
+            if self.config.platform == Platform.WINDOWS:
+                libdir = os.path.join(self.config.toolchain_prefix, 'lib')
+            else:
+                libdir = os.path.join(hostroot, 'lib')
+
+        # copy the dll
+        if not os.path.exists(os.path.join(self.config.prefix, 'bin')):
+            os.makedirs(os.path.join(self.config.prefix, 'bin'))
+        if not os.path.exists(os.path.join(self.config.prefix, 'lib')):
+            os.makedirs(os.path.join(self.config.prefix, 'lib'))
+        for f in ['libwinpthread-1.dll']:
+            shutil.copy(
+                os.path.join(libmingw, f),
+                os.path.join(self.config.prefix, 'bin', f))
+        for f in ['libstdc++-6.dll']:
+            shutil.copy(
+                os.path.join(libdir, f),
+                os.path.join(self.config.prefix, 'bin', f))
+        for f in [self._ehlib + '.dll']:
+            shutil.copy(
+                os.path.join(libdir, f),
+                os.path.join(self.config.prefix, 'bin', f))
+        # copy the development libraries
+        for f, v, d in [
+                ('libstdc++', '', libdir),
+                ('libpthread', '', libmingw),
+                ('libwinpthread', '1', libmingw)]:
+            # Copy the dll.a
+            n_dll_a = f + v + '.dll.a'
+            f_dll_a = os.path.join(d, n_dll_a)
+            if os.path.exists(f_dll_a):
+                shutil.copy(f_dll_a,
+                    os.path.join(self.config.prefix, 'lib', n_dll_a))
+            # Copy the .a
+            f_a = os.path.join(d, f + '.a')
+            if os.path.exists(f_a):
+                shutil.copy(f_a,
+                    os.path.join(self.config.prefix, 'lib', f + '.a'))
+            # Copy and update the .la
+            src = os.path.join(d, f + '.la')
+            if os.path.exists(src):
+                dest = os.path.join(self.config.prefix, 'lib', f + '.la')
+                if os.path.exists(dest):
+                    os.remove(dest)
+                with open(src, 'r') as f:
+                    content = f.readlines()[:-1]
+                    content.append("libdir='%s'" % os.path.join(self.config.prefix, 'lib'))
+                    with open(dest, 'w+') as d:
+                        d.writelines(content)
+        # install headers and static libraries
+        for f in self.files_headers:
+            src = os.path.join(sysroot, f)
+            dest = os.path.join(self.config.prefix, f)
+            if os.path.exists(dest):
+                shutil.rmtree(dest)
+            shutil.copytree(src, dest)
+
+        for f in self.mingw_static_files:
+            out_file = os.path.join('lib', os.path.basename(f))
+            shutil.copy(os.path.join(libmingw, f),
+                os.path.join(self.config.prefix, out_file))
+        for f in self.gcc_static_files:
+            out_file = os.path.join('lib', os.path.basename(f))
+            shutil.copy(os.path.join(self.config.toolchain_prefix, f),
+                os.path.join(self.config.prefix, out_file))
+        # copy the bootstrapped build-tool pkg-config into the prefix so it's
+        # included in the Windows binary release. Of course, we shouldn't try
+        # to do this while bootstrapping, so skip if the prefix is the
+        # build-tools prefix.
+        if self.config.platform == Platform.WINDOWS and \
+           self.config.prefix != self.config.build_tools_prefix:
+            pkgconfig = os.path.join(self.config.build_tools_prefix, 'bin', 'pkg-config.exe')
+            bindir = os.path.join(self.config.prefix, 'bin')
+            shutil.copy(pkgconfig, bindir)

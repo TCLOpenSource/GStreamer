@@ -1,0 +1,53 @@
+# vi:si:et:sw=4:sts=4:ts=4:syntax=python
+# -*- Mode: Python -*-
+
+
+class Package(custom.GStreamer, package.Package):
+
+    name = 'gstreamer-1.0-codecs'
+    shortdesc = 'GStreamer 1.0 codecs'
+    longdesc = 'GStreamer 1.0 codecs'
+    uuid = 'a2e545d5-7819-4636-9e86-3660542f08e5'
+    deps = ['gstreamer-1.0-core', 'base-crypto']
+
+    files = ['flac:libs', 'libkate:libs', 'libdv:libs',
+            'libogg:libs', 'speex:libs', 'libass:libs',
+            'libtheora:libs', 'wavpack:libs', 'libvpx:libs',
+            'opus:libs', 'libvorbis:libs', 'openjpeg:libs',
+            'openh264:libs', 'tiff:libs', 'spandsp:libs',
+            'sbc:libs', 'mpg123:libs', 'lame:libs', 'zbar:libs',
+            'gst-plugins-base-1.0:plugins_codecs', 'gst-plugins-good-1.0:plugins_codecs',
+            'gst-plugins-bad-1.0:plugins_codecs', 'gst-plugins-ugly-1.0:plugins_codecs',
+            ]
+    files_devel = ['gst-plugins-base-1.0:plugins_codecs_devel',
+            'gst-plugins-good-1.0:plugins_codecs_devel',
+            'gst-plugins-bad-1.0:plugins_codecs_devel',
+            'gst-plugins-ugly-1.0:plugins_codecs_devel',
+            'gst-plugins-bad-1.0:codecs_devel']
+    platform_files = {
+            Platform.ANDROID: ['tremor:libs'],
+            Platform.IOS: ['tremor:libs'],
+    }
+
+    def prepare(self):
+        if self.config.variants.rpi:
+            self.files.append('gst-omx-1.0:plugins_codecs')
+            self.files_devel.append('gst-omx-1.0:plugins_codecs_devel')
+
+        if not self.config.variants.visualstudio:
+            self.files += ['taglib:libs']
+
+        if self.config.variants.vaapi:
+            self.files.append('gstreamer-vaapi-1.0:plugins_codecs')
+            self.files_devel.append('gstreamer-vaapi-1.0:plugins_codecs_devel')
+
+        if self.config.target_platform in (Platform.WINDOWS, Platform.ANDROID):
+            # Needed by zbar library
+            self.files.append('libiconv:libs')
+
+        if self.config.variants.uwp:
+            self.files = [
+                'libvpx:libs', 'openh264:libs', 'opus:libs',
+                'gst-plugins-base-1.0:plugins_codecs', 'gst-plugins-good-1.0:plugins_codecs',
+                'gst-plugins-bad-1.0:plugins_codecs', 'gst-plugins-ugly-1.0:plugins_codecs',
+            ]

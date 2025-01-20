@@ -1,0 +1,272 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+class Recipe(custom.GStreamer):
+    name = 'gst-plugins-good-1.0'
+    btype = BuildType.MESON
+    tarball_checksum = 'e51365cfa9b19bd736dafe2c8828254a55d66996a3c60550bb0d50041c381a44'
+    meson_options = {# enabled plugins
+                     'cairo': 'enabled',
+                     'dv': 'enabled',
+                     'flac': 'enabled',
+                     'gdk-pixbuf': 'enabled',
+                     'jpeg': 'enabled',
+                     'lame': 'enabled',
+                     'mpg123': 'enabled',
+                     'png': 'enabled',
+                     'soup': 'enabled',
+                     'speex': 'enabled',
+                     'taglib': 'enabled',
+                     'vpx': 'enabled',
+                     'wavpack': 'enabled',
+                     # disabled plugins
+                     'aalib': 'disabled',
+                     'dv1394': 'disabled',
+                     'gtk3': 'disabled',
+                     'libcaca': 'disabled',
+                     'oss': 'disabled',
+                     'oss4': 'disabled',
+                     'qt5': 'disabled', # Enabled in prepare()
+                     'shout2': 'disabled',
+                     'twolame': 'disabled',
+                     'waveform': 'disabled',}
+    deps = ['gstreamer-1.0', 'gst-plugins-base-1.0', 'libjpeg-turbo', 'libpng',
+            'speex', 'gdk-pixbuf', 'libsoup', 'mpg123', 'lame',
+            'orc', 'wavpack', 'flac', 'taglib', 'bzip2', 'zlib',
+            'libvpx', 'libdv', 'cairo']
+    use_system_libs = True
+
+
+    files_lang = ['gst-plugins-good-1.0']
+
+    files_plugins_core = [
+             'lib/gstreamer-1.0/libgstautodetect%(mext)s',
+             'lib/gstreamer-1.0/libgstvideofilter%(mext)s',
+    ]
+
+    files_plugins_core_devel = [
+             'lib/gstreamer-1.0/libgstautodetect.a', 'lib/gstreamer-1.0/libgstautodetect.la',
+             'lib/gstreamer-1.0/libgstvideofilter.a', 'lib/gstreamer-1.0/libgstvideofilter.la',
+    ]
+
+    files_plugins_effects = [
+             'lib/gstreamer-1.0/libgstalpha%(mext)s',
+             'lib/gstreamer-1.0/libgstalphacolor%(mext)s',
+             'lib/gstreamer-1.0/libgstaudiofx%(mext)s',
+             'lib/gstreamer-1.0/libgstcairo%(mext)s',
+             'lib/gstreamer-1.0/libgstcutter%(mext)s',
+             'lib/gstreamer-1.0/libgstdebug%(mext)s',
+             'lib/gstreamer-1.0/libgstdeinterlace%(mext)s',
+             'lib/gstreamer-1.0/libgstdtmf%(mext)s',
+             'lib/gstreamer-1.0/libgsteffectv%(mext)s',
+             'lib/gstreamer-1.0/libgstequalizer%(mext)s',
+             'lib/gstreamer-1.0/libgstgdkpixbuf%(mext)s',
+             'lib/gstreamer-1.0/libgstimagefreeze%(mext)s',
+             'lib/gstreamer-1.0/libgstinterleave%(mext)s',
+             'lib/gstreamer-1.0/libgstlevel%(mext)s',
+             'lib/gstreamer-1.0/libgstmultifile%(mext)s',
+             'lib/gstreamer-1.0/libgstreplaygain%(mext)s',
+             'lib/gstreamer-1.0/libgstshapewipe%(mext)s',
+             'lib/gstreamer-1.0/libgstsmpte%(mext)s',
+             'lib/gstreamer-1.0/libgstspectrum%(mext)s',
+             'lib/gstreamer-1.0/libgstvideobox%(mext)s',
+             'lib/gstreamer-1.0/libgstvideocrop%(mext)s',
+             'lib/gstreamer-1.0/libgstvideomixer%(mext)s',
+    ]
+
+    files_plugins_effects_devel = [
+             'lib/gstreamer-1.0/libgstalpha.a', 'lib/gstreamer-1.0/libgstalpha.la',
+             'lib/gstreamer-1.0/libgstalphacolor.a', 'lib/gstreamer-1.0/libgstalphacolor.la',
+             'lib/gstreamer-1.0/libgstaudiofx.a', 'lib/gstreamer-1.0/libgstaudiofx.la',
+             'lib/gstreamer-1.0/libgstcairo.a', 'lib/gstreamer-1.0/libgstcairo.la',
+             'lib/gstreamer-1.0/libgstcutter.a', 'lib/gstreamer-1.0/libgstcutter.la',
+             'lib/gstreamer-1.0/libgstdebug.a', 'lib/gstreamer-1.0/libgstdebug.la',
+             'lib/gstreamer-1.0/libgstdeinterlace.a', 'lib/gstreamer-1.0/libgstdeinterlace.la',
+             'lib/gstreamer-1.0/libgstdtmf.a', 'lib/gstreamer-1.0/libgstdtmf.la',
+             'lib/gstreamer-1.0/libgsteffectv.a', 'lib/gstreamer-1.0/libgsteffectv.la',
+             'lib/gstreamer-1.0/libgstequalizer.a', 'lib/gstreamer-1.0/libgstequalizer.la',
+             'lib/gstreamer-1.0/libgstgdkpixbuf.a', 'lib/gstreamer-1.0/libgstgdkpixbuf.la',
+             'lib/gstreamer-1.0/libgstimagefreeze.a', 'lib/gstreamer-1.0/libgstimagefreeze.la',
+             'lib/gstreamer-1.0/libgstinterleave.a', 'lib/gstreamer-1.0/libgstinterleave.la',
+             'lib/gstreamer-1.0/libgstlevel.a', 'lib/gstreamer-1.0/libgstlevel.la',
+             'lib/gstreamer-1.0/libgstmultifile.a', 'lib/gstreamer-1.0/libgstmultifile.la',
+             'lib/gstreamer-1.0/libgstreplaygain.a', 'lib/gstreamer-1.0/libgstreplaygain.la',
+             'lib/gstreamer-1.0/libgstshapewipe.a', 'lib/gstreamer-1.0/libgstshapewipe.la',
+             'lib/gstreamer-1.0/libgstsmpte.a', 'lib/gstreamer-1.0/libgstsmpte.la',
+             'lib/gstreamer-1.0/libgstspectrum.a', 'lib/gstreamer-1.0/libgstspectrum.la',
+             'lib/gstreamer-1.0/libgstvideobox.a', 'lib/gstreamer-1.0/libgstvideobox.la',
+             'lib/gstreamer-1.0/libgstvideocrop.a', 'lib/gstreamer-1.0/libgstvideocrop.la',
+             'lib/gstreamer-1.0/libgstvideomixer.a', 'lib/gstreamer-1.0/libgstvideomixer.la',
+    ]
+
+    files_plugins_codecs = [
+             'lib/gstreamer-1.0/libgstalaw%(mext)s',
+             'lib/gstreamer-1.0/libgstapetag%(mext)s',
+             'lib/gstreamer-1.0/libgstaudioparsers%(mext)s',
+             'lib/gstreamer-1.0/libgstauparse%(mext)s',
+             'lib/gstreamer-1.0/libgstavi%(mext)s',
+             'lib/gstreamer-1.0/libgstdv%(mext)s',
+             'lib/gstreamer-1.0/libgstflac%(mext)s',
+             'lib/gstreamer-1.0/libgstflv%(mext)s',
+             'lib/gstreamer-1.0/libgstflxdec%(mext)s',
+             'lib/gstreamer-1.0/libgsticydemux%(mext)s',
+             'lib/gstreamer-1.0/libgstid3demux%(mext)s',
+             'lib/gstreamer-1.0/libgstisomp4%(mext)s',
+             'lib/gstreamer-1.0/libgstjpeg%(mext)s',
+             'lib/gstreamer-1.0/libgstlame%(mext)s',
+             'lib/gstreamer-1.0/libgstmatroska%(mext)s',
+             'lib/gstreamer-1.0/libgstmpg123%(mext)s',
+             'lib/gstreamer-1.0/libgstmulaw%(mext)s',
+             'lib/gstreamer-1.0/libgstmultipart%(mext)s',
+             'lib/gstreamer-1.0/libgstpng%(mext)s',
+             'lib/gstreamer-1.0/libgstspeex%(mext)s',
+             'lib/gstreamer-1.0/libgsttaglib%(mext)s',
+             'lib/gstreamer-1.0/libgstvpx%(mext)s',
+             'lib/gstreamer-1.0/libgstwavenc%(mext)s',
+             'lib/gstreamer-1.0/libgstwavpack%(mext)s',
+             'lib/gstreamer-1.0/libgstwavparse%(mext)s',
+             'lib/gstreamer-1.0/libgsty4menc%(mext)s',
+    ]
+
+    files_plugins_codecs_devel = [
+             'lib/gstreamer-1.0/libgstalaw.a', 'lib/gstreamer-1.0/libgstalaw.la',
+             'lib/gstreamer-1.0/libgstapetag.a', 'lib/gstreamer-1.0/libgstapetag.la',
+             'lib/gstreamer-1.0/libgstaudioparsers.a', 'lib/gstreamer-1.0/libgstaudioparsers.la',
+             'lib/gstreamer-1.0/libgstauparse.a', 'lib/gstreamer-1.0/libgstauparse.la',
+             'lib/gstreamer-1.0/libgstavi.a', 'lib/gstreamer-1.0/libgstavi.la',
+             'lib/gstreamer-1.0/libgstdv.a', 'lib/gstreamer-1.0/libgstdv.la',
+             'lib/gstreamer-1.0/libgstflac.a', 'lib/gstreamer-1.0/libgstflac.la',
+             'lib/gstreamer-1.0/libgstflv.a', 'lib/gstreamer-1.0/libgstflv.la',
+             'lib/gstreamer-1.0/libgstflxdec.a', 'lib/gstreamer-1.0/libgstflxdec.la',
+             'lib/gstreamer-1.0/libgsticydemux.a', 'lib/gstreamer-1.0/libgsticydemux.la',
+             'lib/gstreamer-1.0/libgstid3demux.a', 'lib/gstreamer-1.0/libgstid3demux.la',
+             'lib/gstreamer-1.0/libgstisomp4.a', 'lib/gstreamer-1.0/libgstisomp4.la',
+             'lib/gstreamer-1.0/libgstjpeg.a', 'lib/gstreamer-1.0/libgstjpeg.la',
+             'lib/gstreamer-1.0/libgstlame.a', 'lib/gstreamer-1.0/libgstlame.la',
+             'lib/gstreamer-1.0/libgstmatroska.a', 'lib/gstreamer-1.0/libgstmatroska.la',
+             'lib/gstreamer-1.0/libgstmpg123.a', 'lib/gstreamer-1.0/libgstmpg123.la',
+             'lib/gstreamer-1.0/libgstmulaw.a', 'lib/gstreamer-1.0/libgstmulaw.la',
+             'lib/gstreamer-1.0/libgstmultipart.a', 'lib/gstreamer-1.0/libgstmultipart.la',
+             'lib/gstreamer-1.0/libgstpng.a', 'lib/gstreamer-1.0/libgstpng.la',
+             'lib/gstreamer-1.0/libgstspeex.a', 'lib/gstreamer-1.0/libgstspeex.la',
+             'lib/gstreamer-1.0/libgsttaglib.a', 'lib/gstreamer-1.0/libgsttaglib.la',
+             'lib/gstreamer-1.0/libgstvpx.a', 'lib/gstreamer-1.0/libgstvpx.la',
+             'lib/gstreamer-1.0/libgstwavenc.a', 'lib/gstreamer-1.0/libgstwavenc.la',
+             'lib/gstreamer-1.0/libgstwavpack.a', 'lib/gstreamer-1.0/libgstwavpack.la',
+             'lib/gstreamer-1.0/libgstwavparse.a', 'lib/gstreamer-1.0/libgstwavparse.la',
+             'lib/gstreamer-1.0/libgsty4menc.a', 'lib/gstreamer-1.0/libgsty4menc.la',
+    ]
+
+    files_plugins_net = [
+             'lib/gstreamer-1.0/libgstrtsp%(mext)s',
+             'lib/gstreamer-1.0/libgstrtp%(mext)s',
+             'lib/gstreamer-1.0/libgstrtpmanager%(mext)s',
+             'lib/gstreamer-1.0/libgstsoup%(mext)s',
+             'lib/gstreamer-1.0/libgstudp%(mext)s',
+    ]
+
+    files_plugins_net_devel = [
+             'lib/gstreamer-1.0/libgstrtsp.a', 'lib/gstreamer-1.0/libgstrtsp.la',
+             'lib/gstreamer-1.0/libgstrtp.a', 'lib/gstreamer-1.0/libgstrtp.la',
+             'lib/gstreamer-1.0/libgstrtpmanager.a', 'lib/gstreamer-1.0/libgstrtpmanager.la',
+             'lib/gstreamer-1.0/libgstsoup.a', 'lib/gstreamer-1.0/libgstsoup.la',
+             'lib/gstreamer-1.0/libgstudp.a', 'lib/gstreamer-1.0/libgstudp.la',
+    ]
+
+    files_plugins_vis = [
+             'lib/gstreamer-1.0/libgstgoom%(mext)s',
+             'lib/gstreamer-1.0/libgstgoom2k1%(mext)s',
+    ]
+
+    files_plugins_vis_devel = [
+             'lib/gstreamer-1.0/libgstgoom.a', 'lib/gstreamer-1.0/libgstgoom.la',
+             'lib/gstreamer-1.0/libgstgoom2k1.a', 'lib/gstreamer-1.0/libgstgoom2k1.la',
+    ]
+
+    files_plugins_capture = []
+    files_plugins_capture_devel = []
+
+    files_plugins_sys = []
+    files_plugins_sys_devel = []
+
+    platform_files_plugins_sys = {
+        Platform.WINDOWS: [
+             'lib/gstreamer-1.0/libgstdirectsound%(mext)s',
+            ],
+        Platform.DARWIN: [
+             'lib/gstreamer-1.0/libgstosxaudio%(mext)s',
+             'lib/gstreamer-1.0/libgstosxvideo%(mext)s',
+            ],
+        Platform.IOS: [
+             'lib/gstreamer-1.0/libgstosxaudio%(mext)s'
+        ]
+    }
+
+    platform_files_plugins_sys_devel = {
+        Platform.WINDOWS: [
+             'lib/gstreamer-1.0/libgstdirectsound.a', 'lib/gstreamer-1.0/libgstdirectsound.la',
+            ],
+        Platform.DARWIN: [
+             'lib/gstreamer-1.0/libgstosxaudio.a', 'lib/gstreamer-1.0/libgstosxaudio.la',
+             'lib/gstreamer-1.0/libgstosxvideo.a', 'lib/gstreamer-1.0/libgstosxvideo.la',
+            ],
+        Platform.IOS: [
+             'lib/gstreamer-1.0/libgstosxaudio.a', 'lib/gstreamer-1.0/libgstosxaudio.la',
+        ]
+    }
+
+
+    def prepare(self):
+        self.append_env('CFLAGS', '-DLIBSOUP_DOES_NOT_STEAL_OUR_CONTEXT=1')
+        # Disable CFRunLoop integration since we enable the Cocoa MainLoop
+        # integration in the GLib recipe
+        if self.config.target_platform in (Platform.DARWIN, Platform.IOS):
+            self.append_env('CFLAGS', '-DGSTREAMER_GLIB_COCOA_NSAPPLICATION=1')
+            self.append_env('OBJCFLAGS', '-DGSTREAMER_GLIB_COCOA_NSAPPLICATION=1')
+
+        if self.config.target_platform == Platform.WINDOWS:
+            self.meson_options['directsound'] = 'enabled'
+        elif self.config.target_platform == Platform.DARWIN:
+            self.meson_options['osxaudio'] = 'enabled'
+            self.meson_options['osxvideo'] = 'enabled'
+        elif self.config.target_platform == Platform.IOS:
+            self.meson_options['osxaudio'] = 'enabled'
+
+        self.enable_plugin('video4linux2', 'capture', variant='v4l2', option='v4l2')
+        self.enable_plugin('ximagesrc', 'capture', variant='x11')
+        self.enable_plugin('pulseaudio', 'sys', variant='pulse', option='pulse')
+        self.enable_plugin('jack', 'sys', variant='jack')
+
+        # Enable qt5 plugin if possible and selected
+        can_enable_qt5 = True
+        if self.config.target_platform == Platform.IOS:
+            # iOS Qt5 binaries support arm64 and x86
+            if self.config.target_arch not in (Architecture.ARM64, Architecture.X86_64):
+                can_enable_qt5 = False
+        elif self.config.target_platform == Platform.ANDROID:
+            # Android Qt5 binaries support armv7, arm64, x86
+            if self.config.target_arch == Architecture.X86_64:
+                can_enable_qt5 = False
+        if can_enable_qt5:
+            self.enable_plugin('qmlgl', 'qt5', 'qt5', option='qt5')
+
+        if self.using_msvc():
+            # plugin is C++, library is Autotools
+            self.disable_plugin('taglib', 'codecs', dep='taglib')
+
+        if self.using_uwp():
+            # Uses unavailable APIs
+            self.disable_plugin('directsound', 'sys')
+            # External deps that haven't been ported to UWP
+            self.disable_plugin('cairo', 'effects', dep='cairo')
+            self.disable_plugin('flac', 'codecs', dep='flac')
+            self.disable_plugin('gdkpixbuf', 'effects', option='gdk-pixbuf', dep='gdk-pixbuf')
+            self.disable_plugin('jpeg', 'codecs', dep='libjpeg-turbo')
+            self.disable_plugin('lame', 'codecs', dep='lame')
+            self.disable_plugin('mpg123', 'codecs', dep='mpg123')
+            self.disable_plugin('png', 'codecs', dep='libpng')
+            self.disable_plugin('soup', 'net', dep='libsoup')
+            self.disable_plugin('speex', 'codecs', dep='speex')
+            self.disable_plugin('wavpack', 'codecs', dep='wavpack')
+
+        if self.config.variants.nodebug:
+            self.append_env('CFLAGS', '-DGST_LEVEL_MAX=GST_LEVEL_FIXME')

@@ -1,0 +1,93 @@
+ # -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+import sys
+import shutil
+
+from cerbero.tools.libtool import LibtoolLibrary
+
+GRAPHENE_CONFIG_UNVERSAL='''\
+#ifdef __i386__
+#include "i386/graphene-config.h"
+#elif defined(__ppc__)
+#include "ppc/graphene-config.h"
+#elif defined(__x86_64__)
+#include "x86_64/graphene-config.h"
+#elif defined(__arm__)
+#include "arm/graphene-config.h"
+#elif defined(__arm64__)
+#include "arm64/graphene-config.h"
+#else
+#error "Unsupported Architecture"
+#endif
+'''
+
+class Recipe(recipe.Recipe):
+    name = 'graphene'
+    stype = SourceType.TARBALL
+    btype = BuildType.MESON
+    version = '1.10.2'
+    url = 'https://github.com/ebassi/graphene/archive/{0}.tar.gz'.format(version)
+    tarball_checksum = '87c682291fa38a131aaf9aaee17d053d7bd4ea5309d305a356619c95784b9b4d'
+    licenses = [{License.MIT: ['LICENSE.txt']}]
+    meson_options = {
+        # XXX: check whether neon support works better
+        'arm_neon' : 'false',
+        'introspection' : 'false',
+        'installed_tests': 'false',
+    }
+
+    deps = ['glib']
+
+    files_libs = ['libgraphene-1.0']
+#    files_typelibs = ['Graphene-1.0']
+
+    files_devel = [
+        'include/graphene-1.0',
+        'lib/graphene-1.0/include',
+        'lib/pkgconfig/graphene-1.0.pc',
+        'lib/pkgconfig/graphene-gobject-1.0.pc',
+    ]
+
+    def prepare(self):
+        if self.config.variants.gi:
+            self.deps.append("gobject-introspection")
+            self.meson_options['introspection'] = 'true'
+
+        # Graphene don't support SSE2 dynamically, disable for now
+        if self.config.target_arch == Architecture.X86:
+            self.meson_options['sse2'] = 'false'
+            self.meson_options['gcc_vector'] = 'false'
+
+        # -msse4.1 causes clang to segfault building graphene-matrix.c on OS X
+        # when building for x64_64. Disable it for now.
+        if self.config.target_platform in [Platform.DARWIN, Platform.IOS]:
+            arch = self.config.target_arch
+            if arch == Architecture.X86_64:
+                self.set_env('SSE41_CFLAGS', ' ')
+
+    def post_install(self):
+        if self.config.target_platform in [Platform.DARWIN, Platform.IOS]:
+            # For the universal build we need to ship graphene-config.h of all
+            # architectures in a subfolder and include the correct one depending
+            # on the compiler architecture
+            arch = self.config.target_arch
+            if arch == Architecture.X86:
+                arch = 'i386'
+            elif arch == Architecture.ARM64:
+                arch = 'arm64'
+            elif Architecture.is_arm(arch):
+                arch = 'arm'
+
+            arch_dir = os.path.join(self.config.prefix, 'lib', 'graphene-1.0',
+                                     'include', arch)
+            if not os.path.exists(arch_dir):
+                os.makedirs(arch_dir)
+            shutil.copyfile(os.path.join(self.meson_dir, 'include', 'graphene-config.h'),
+                            os.path.join(arch_dir, 'graphene-config.h'))
+            with open(os.path.join(self.config.prefix, 'lib', 'graphene-1.0',
+                                   'include', 'graphene-config.h'), 'w+') as f:
+                f.write(GRAPHENE_CONFIG_UNVERSAL)
+
+        lib = LibtoolLibrary('graphene-1.0', None, None, None, self.config.libdir,
+                self.config.target_platform, deps=['gobject-2.0', '-lm', '-pthread'])
+        lib.save()
+        super().post_install()

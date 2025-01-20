@@ -1,0 +1,16 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+class Recipe(recipe.Recipe):
+    version = '3.100'
+    name = 'lame'
+    licenses = [{License.LGPLv2Plus: None, License.Misc: ['README', 'LICENSE']}]
+    stype = SourceType.TARBALL
+    configure_options = ' --enable-static --disable-frontend --disable-decoder'
+    url = 'sf://.tar.gz'
+    tarball_checksum = 'ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e'
+    patches = ['lame/0001-Remove-decoder-symbols.patch']
+
+    files_libs = ['libmp3lame']
+    files_bins = ['lame']
+    files_devel = ['include/lame/lame.h']
+

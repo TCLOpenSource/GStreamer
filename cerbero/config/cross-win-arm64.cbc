@@ -1,0 +1,2 @@
+from cerbero.config import Architecture
+target_arch = Architecture.ARM64

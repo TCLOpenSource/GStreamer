@@ -1,0 +1,19 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+
+class Recipe(recipe.Recipe):
+    name = 'libdvdread'
+    version = '5.0.0'
+    stype = SourceType.TARBALL
+    url = 'https://www.videolan.org/pub/videolan/libdvdread/%(version)s/libdvdread-%(version)s.tar.bz2'
+    tarball_checksum = '66fb1a3a42aa0c56b02547f69c7eb0438c5beeaf21aee2ae2c6aa23ea8305f14'
+    licenses = [License.GPLv2Plus]
+    autoreconf = True
+    patches = [name + '/0001-Fix-compilation-on-Windows-by-including-files-with-t.patch',
+               name + '/0002-Build-DLLs-on-Windows.patch',
+               name + '/0003-dvd_reader.h-Define-ssize_t-on-MSVC.patch'
+              ]
+    configure_options = ' --enable-static --enable-shared '
+
+    files_libs = ['libdvdread']
+    files_devel = ['include/dvdread', 'lib/pkgconfig/dvdread.pc']

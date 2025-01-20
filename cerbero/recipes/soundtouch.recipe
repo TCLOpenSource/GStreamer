@@ -1,0 +1,38 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+from cerbero.tools.libtool import LibtoolLibrary
+
+
+class Recipe(recipe.Recipe):
+    name = 'soundtouch'
+    version = '2.1.0'
+    btype = BuildType.MESON
+    stype = SourceType.TARBALL
+    url = 'https://gitlab.com/soundtouch/soundtouch/-/archive/%(version)s/soundtouch-%(version)s.tar.gz'
+    tarball_checksum = '454712b08bf758f6a4c0df8821350c323e5b274443a20e21d193d17c5dc3d0d5'
+    licenses = [License.LGPLv2_1Plus]
+
+    patches = [
+               'soundtouch/0008-Fix-compilation-with-clang.patch',
+               'soundtouch/0001-Add-minimal-meson-build-system.patch',
+               'soundtouch/0002-add-support-for-linking-with-gnustl-on-android.patch',
+              ]
+
+    files_libs = ['libSoundTouch']
+    files_devel = ['include/soundtouch', 'lib/pkgconfig/soundtouch.pc']
+
+    # FIXME: Meson port does not export symbols correctly for use with MSVC
+    can_msvc = False
+
+    def prepare (self):
+      if self.config.target_platform == Platform.ANDROID:
+        self.append_env('CXXFLAGS', '-fexceptions -DST_NO_EXCEPTION_HANDLING')
+
+    def post_install (self):
+        dependency_libs = []
+        if self.config.target_platform == Platform.ANDROID:
+            dependency_libs += ['gnustl', '-lm']
+
+        lib = LibtoolLibrary('SoundTouch', None, None, None, self.config.libdir,
+                self.config.target_platform, deps=dependency_libs)
+        lib.save()
+        super().post_install()

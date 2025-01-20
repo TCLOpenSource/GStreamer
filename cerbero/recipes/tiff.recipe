@@ -1,0 +1,30 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+
+class Recipe(recipe.Recipe):
+    name = 'tiff'
+    version = '4.0.10'
+    stype = SourceType.TARBALL
+    url = 'https://download.osgeo.org/libtiff/tiff-%(version)s.tar.gz'
+    tarball_checksum = '2c52d11ccaf767457db0c46795d9c7d1a8d8f76f68b0b800a3dfe45786b996e4'
+    licenses = [{License.BSD_like: ['COPYRIGHT']}]
+    deps = [ 'zlib', 'libjpeg-turbo' ]
+    configure_options = ' --disable-cxx no_gl=yes'
+
+    files_libs = ['libtiff']
+    files_bins = ['tiffcrop', 'bmp2tiff', 'gif2tiff', 'ppm2tiff'
+        'tiffdump', 'tiffsplit', 'tiffmedian', 'ras2tiff', 'tiff2ps',
+        'tiff2pdf', 'tiffset', 'tiffcp', 'tiff2rgba', 'tiffinfo', 'tiff2bw',
+        'raw2tiff', 'fax2tiff', 'tiffdither', 'tiffcmp']
+    files_devel = ['include/tiffvers.h', 'include/tiffio.h', 'include/tiff.h',
+        'include/tiffconf.h', 'lib/pkgconfig/libtiff-4.pc']
+
+    def prepare(self):
+        if self.config.target_platform == Platform.ANDROID:
+            v = DistroVersion.get_android_api_version(self.config.target_distro_version)
+            if self.config.target_arch in [Architecture.ARM, Architecture.ARMv7, Architecture.X86] and v < 21:
+                # FIXME: HACK to make projects using mmap compile with NDK 16
+                # we fail to compile with -D_FILE_OFFSET_BITS=64
+                # because we don't use clang and we use a platform < 21 (Lollipop)
+                # See $NDK_ROOT/sysroot/usr/include/sys/mman.h as one example
+                self.set_env('ac_cv_func_mmap', 'no')

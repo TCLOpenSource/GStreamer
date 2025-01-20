@@ -1,0 +1,39 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+from cerbero.tools.libtool import LibtoolLibrary
+
+class Recipe(recipe.Recipe):
+    name = 'libsoup'
+    version = '2.68.3'
+    licenses = [License.LGPLv2Plus]
+    stype = SourceType.TARBALL
+    btype = BuildType.MESON
+    url = 'gnome://'
+    tarball_checksum = '534bb08e35b0ff3702f3adfde87d3441e27c12f9f5ec351f056fe04cba02bafb'
+    meson_options = {'gnome': 'false', 'vapi': 'disabled', 'tls_check': 'false', 'tests' : 'false'}
+    deps = ['libxml2', 'glib', 'glib-networking', 'libpsl']
+
+    # sqlite ships with the system on macOS and iOS. Android also ships with
+    # sqlite3, but it's not available from the NDK; only from Java.
+    # We also build it on Linux to avoid the potential for bugs with
+    # use_system_libs and to support cross-linux.
+    platform_deps = {
+        Platform.ANDROID: ['sqlite3'],
+        Platform.WINDOWS: ['sqlite3'],
+        Platform.LINUX: ['sqlite3'],
+    }
+
+    files_libs = ['libsoup-2.4']
+    files_devel = ['include/libsoup-2.4', 'lib/pkgconfig/libsoup-2.4.pc']
+    files_typelibs = ['Soup-2.4']
+
+    def post_install(self):
+        soup_deps = ['gio-2.0', 'gmodule-2.0', 'gobject-2.0', 'glib-2.0',
+                     'ffi', 'xml2', 'psl', 'z']
+        if self.config.target_platform not in (Platform.IOS, Platform.DARWIN):
+            soup_deps += ['sqlite3']
+        # Meson does not generate la files
+        LibtoolLibrary('soup-2.4', None, None, None,
+                self.config.libdir, self.config.target_platform,
+                deps=soup_deps).save()
+        super().post_install()

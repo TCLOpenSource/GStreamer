@@ -1,0 +1,28 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+class Recipe(recipe.Recipe):
+    name = 'glib-tools'
+    version = '2.62.5'
+    stype = SourceType.TARBALL
+    url = 'gnome://glib/%(maj_ver)s/glib-%(version)s.tar.xz'
+    tarball_dirname = 'glib-%(version)s'
+    tarball_checksum = 'b8d1cdafa46658b63d7512efbe2cd21bd36cd7be83140e44930c47b79f82452e'
+    licenses = [License.LGPLv2Plus]
+    btype = BuildType.MESON
+    meson_options = {'internal_pcre': 'true', 'libmount': 'false',
+                     'dtrace': 'false', 'iconv': 'auto', 'selinux' : 'disabled'}
+    deps = ['libffi', 'zlib', 'pkg-config']
+
+    def prepare(self):
+        # On Linux we must use the system gettext
+        if self.config.platform != Platform.LINUX:
+            self.deps.append('proxy-libintl')
+
+        # Android only provides libiconv with API level >=28 (Pie and newer)
+        if self.config.target_platform == Platform.ANDROID:
+            self.deps.append('libiconv')
+
+        if self.config.target_platform == Platform.WINDOWS:
+            # Want secure versions of stdlib functions. Glib already defines
+            # _WIN32_WINNT, so undefine it on the cmdline to avoid warnings
+            self.append_env('CFLAGS', '-DMINGW_HAS_SECURE_API=1', '-U_WIN32_WINNT')

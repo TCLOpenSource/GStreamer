@@ -1,0 +1,27 @@
+# vi:si:et:sw=4:sts=4:ts=4:syntax=python:ft=python
+# -*- Mode: Python -*-
+
+
+class Package(custom.GStreamer, package.Package):
+
+    name = 'gstreamer-1.0-dvd'
+    shortdesc = 'GStreamer 1.0 DVD support'
+    longdesc = 'GStreamer 1.0 DVD support'
+    uuid = 'b92c270e-3d91-48ea-bedf-fdc01b41caba'
+    deps = ['gstreamer-1.0-core']
+
+    files = ['libdvdnav:libs', 'libdvdread:libs',
+            'gst-plugins-base-1.0:plugins_dvd',
+            'gst-plugins-good-1.0:plugins_dvd',
+            'gst-plugins-ugly-1.0:plugins_dvd',
+            'gst-plugins-bad-1.0:plugins_dvd']
+    files_devel = ['gst-plugins-base-1.0:plugins_dvd_devel'
+            'gst-plugins-good-1.0:plugins_dvd_devel',
+            'gst-plugins-ugly-1.0:plugins_dvd_devel',
+            'gst-plugins-bad-1.0:plugins_dvd_devel']
+
+    def prepare(self):
+        # Recipes that need autoreconf hang on the Windows CI
+        if self.config.platform == Platform.WINDOWS:
+            self.files.remove('libdvdnav:libs')
+            self.files.remove('libdvdread:libs')

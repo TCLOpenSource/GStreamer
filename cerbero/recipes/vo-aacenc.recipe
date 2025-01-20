@@ -1,0 +1,18 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+
+class Recipe(recipe.Recipe):
+    name = 'vo-aacenc'
+    version = '0.1.3'
+    licenses = [License.Apachev2]
+    stype = SourceType.TARBALL
+    url = 'sf://opencore-amr/%(name)s-%(version)s.tar.gz'
+    tarball_checksum = 'e51a7477a359f18df7c4f82d195dab4e14e7414cbd48cf79cc195fc446850f36'
+
+    files_libs = ['libvo-aacenc']
+    files_devel = ['include/vo-aacenc',
+        'lib/pkgconfig/vo-aacenc.pc']
+
+    def prepare(self):
+        if self.config.platform != Platform.WINDOWS:
+            self.autoreconf = True

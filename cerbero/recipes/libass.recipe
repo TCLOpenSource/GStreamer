@@ -1,0 +1,22 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+
+class Recipe(recipe.Recipe):
+    name = 'libass'
+    version = '0.15.2'
+    licenses = [{License.BSD_like: ['COPYING']}]
+    stype = SourceType.TARBALL
+    url = 'https://github.com/libass/libass/releases/download/{0}/libass-{0}.tar.xz'.format(version)
+    tarball_checksum = '1be2df9c4485a57d78bb18c0a8ed157bc87a5a8dd48c661961c625cb112832fd'
+    deps = ['freetype', 'fontconfig', 'libpng', 'fribidi', 'harfbuzz']
+
+    files_libs = ['libass']
+    files_devel = ['include/ass', 'lib/pkgconfig/libass.pc']
+
+    def prepare(self):
+        if self.config.target_platform == Platform.IOS and \
+            self.config.target_arch in [Architecture.X86, Architecture.X86_64]:
+            self.append_env('LDFLAGS', '-Wl,-read_only_relocs,suppress')
+        if self.config.target_platform in (Platform.WINDOWS, Platform.ANDROID):
+            # Needed for codepage conversion support in subtitles
+            self.deps.append('libiconv')

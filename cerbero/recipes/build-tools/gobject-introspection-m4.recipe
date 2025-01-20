@@ -1,0 +1,23 @@
+ # -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+import shutil
+
+class Recipe(recipe.Recipe):
+    """
+    Ships the introspection.m4 macro file from the gobject-introspection tarball
+    """
+    name = 'gobject-introspection-m4'
+    _name = 'gobject-introspection'
+    version = '1.54.1'
+    stype = SourceType.TARBALL
+    url = 'gnome://{0}/%(maj_ver)s/{0}-%(version)s.tar.xz'.format(_name)
+    tarball_checksum = 'b88ded5e5f064ab58a93aadecd6d58db2ec9d970648534c63807d4f9a7bb877e'
+    tarball_dirname = '{}-%(version)s'.format(_name)
+    licenses = [License.GPLv2Plus]
+    btype = BuildType.CUSTOM
+    files_devel = ['share/aclocal/introspection.m4']
+    override_libtool = False
+
+    async def install(self):
+        shutil.copy(os.path.join(self.build_dir, 'm4', 'introspection.m4'),
+                    os.path.join(self.config.prefix, 'share', 'aclocal'))

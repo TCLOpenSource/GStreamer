@@ -1,0 +1,40 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+import re
+import shutil
+from cerbero.utils.shell import async_call_output
+from cerbero.ide.xcode.fwlib import DynamicFrameworkLibrary
+
+class Recipe(recipe.Recipe):
+    name = 'gstreamer-1.0-osx-framework'
+    version = '0.1'
+    stype = SourceType.CUSTOM
+    btype = BuildType.CUSTOM
+    deps = ['pkg-config', 'gstreamer-1.0', 'gst-plugins-base-1.0', 'gst-plugins-bad-1.0', 'gst-rtsp-server-1.0']
+
+    files_library = ['lib/GStreamer']
+
+    async def _get_installed_gst_libs(self):
+        args = [self.env['PKG_CONFIG'], '--list-all']
+        out = await async_call_output(args, logfile=self.logfile, cpu_bound=False, env=self.env)
+        gstlibs = []
+        gstlib_regex = re.compile(r'^(gstreamer-.*1\.0)\s+')
+        for line in out.split('\n'):
+            m = gstlib_regex.search(line)
+            # Not a gstreamer pkgconfig file
+            if not m:
+                continue
+            gstlib = m.groups()[0]
+            # Not a gstreamer library pkgconfig file
+            if 'gstreamer-plugins-' in gstlib:
+                continue
+            gstlibs.append(gstlib)
+        return gstlibs
+
+    async def install(self):
+        libname = os.path.join(self.config.prefix, 'lib', 'GStreamer')
+        install_name = '@rpath/GStreamer.framework/Versions/1.0/lib/GStreamer'
+        libs = await self._get_installed_gst_libs()
+        if not libs:
+            raise FatalError('No gstreamer libraries were found in the prefix!')
+        fwlib = DynamicFrameworkLibrary(self.config.min_osx_sdk_version, self.config.target_distro, libname, install_name, libs, self.config.target_arch, env=self.env)
+        fwlib.create()

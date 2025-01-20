@@ -1,0 +1,62 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+import shutil
+
+from cerbero.tools.libtool import LibtoolLibrary
+
+class Recipe(recipe.Recipe):
+    name = 'taglib'
+    version = '1.11.1'
+    stype = SourceType.TARBALL
+    # This uses a github certificate, hence fails TLS check
+    #url = 'https://taglib.org/releases/taglib-%(version)s.tar.gz'
+    url = 'https://github.com/taglib/taglib/releases/download/v1.11.1/taglib-%(version)s.tar.gz'
+    tarball_checksum = 'b6d1a5a610aae6ff39d93de5efd0fdc787aa9e9dc1e7026fa4c961b26563526b'
+    # either LGPLv2.1 or MPLv1.1
+    licenses = [License.LGPLv2_1Plus, License.MPLv1_1]
+
+    btype = BuildType.CMAKE
+    configure_options = '-DWITH_MP4=ON \
+        -DWITH_ASF=ON \
+        -DBUILD_SHARED_LIBS=1 \
+        -DBUILD_STATIC_LIBS=1 \
+        -DCMAKE_DISABLE_FIND_PACKAGE_Boost=TRUE'
+    can_msvc = True
+    cmake_generator = 'ninja'
+
+    patches = [
+        'taglib/0001-Link-with-correct-STL-on-Android.patch',
+        'taglib/0002-Build-a-static-and-non-static-version.patch',
+        # https://github.com/taglib/taglib/pull/1071
+        'taglib/0003-cmake-generate-pc-file-with-the-use-of-prefix-in-lib.patch',
+    ]
+
+    files_libs = ['libtag']
+    files_devel = ['include/taglib', 'lib/pkgconfig/taglib.pc']
+
+    def prepare(self):
+        if self.config.target_platform == Platform.WINDOWS:
+            self.configure_options += ' -DWIN32=1'
+        if self.config.target_platform == Platform.ANDROID:
+            # configure for android
+            self.configure_options += ' -DANDROID_NDK=1 '
+            self.append_env('CXXFLAGS', '-frtti')
+        self.configure_options += ' -DZLIB_ROOT=%s ' % self.config.prefix
+
+    async def install(self):
+        await super(recipe.Recipe, self).install()
+        if self.using_msvc():
+            stlib_name = 'tag_static.lib'
+        else:
+            stlib_name = 'libtag_static.a'
+        shutil.move(
+                os.path.join(self.config.prefix, 'lib', stlib_name),
+                os.path.join(self.config.prefix, 'lib', 'libtag.a'))
+
+    def post_install(self):
+        deps = ['z']
+        if self.config.target_platform == Platform.ANDROID:
+            deps.append('gnustl')
+        libtool_la = LibtoolLibrary('tag', 1, 7, None, self.config.libdir,
+                self.config.target_platform, deps)
+        libtool_la.save()
+        super().post_install()

@@ -1,0 +1,20 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+from cerbero.utils import shell
+
+
+class Recipe(recipe.Recipe):
+    name = 'frei0r-plugins'
+    version = '1.7.0'
+    licenses = [License.GPLv2Plus]
+    stype = SourceType.TARBALL
+    btype = BuildType.CMAKE
+    cmake_generator = 'ninja'
+    can_msvc = False
+    url = 'https://files.dyne.org/frei0r/releases/%(name)s-%(version)s.tar.gz'
+    tarball_checksum = '1b1ff8f0f9bc23eed724e94e9a7c1d8f0244bfe33424bb4fe68e6460c088523a'
+
+    files_plugins = ['lib/frei0r-1']
+    files_devel = [
+        'lib/pkgconfig/frei0r.pc',
+        'include/frei0r.h',
+    ]

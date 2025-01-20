@@ -1,0 +1,33 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+from cerbero.tools.libtool import LibtoolLibrary
+
+class Recipe(recipe.Recipe):
+    name = 'fribidi'
+    version = '1.0.5'
+    stype = SourceType.TARBALL
+    btype = BuildType.MESON
+    url = 'https://github.com/fribidi/fribidi/releases/download/v%(version)s/fribidi-%(version)s.tar.bz2'
+    tarball_checksum = '6a64f2a687f5c4f203a46fa659f43dd43d1f8b845df8d723107e8a7e6158e4ce'
+    licenses = [License.LGPLv2_1Plus]
+
+    # gen.tab/gen-unicode-version needs to be built and run during compilation
+    meson_needs_build_machine_compiler = True
+
+    deps = ['glib']
+    patches = [
+        # Taken from upstream master, remove on bump
+        'fribidi/0001-Build-generator-executables-natively.patch',
+        # https://github.com/fribidi/fribidi/pull/143
+        'fribidi/0001-meson-Use-the-debug-option-directly-instead-of-build.patch',
+    ]
+
+    files_libs = ['libfribidi']
+    files_bins = ['fribidi']
+    files_devel = ['lib/pkgconfig/fribidi.pc', 'include/fribidi']
+
+    def post_install (self):
+        lib = LibtoolLibrary('fribidi', None, None, None, self.config.libdir,
+                self.config.target_platform, deps=['glib-2.0'])
+        lib.save()
+        super().post_install()

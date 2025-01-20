@@ -1,0 +1,17 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+
+class Recipe(recipe.Recipe):
+    name = 'freetype'
+    version = '2.11.0'
+    stype = SourceType.TARBALL
+    url = 'savannah://.tar.xz'
+    tarball_checksum = '8bee39bd3968c4804b70614a0a3ad597299ad0e824bc8aad5ce8aaf48067bde7'
+    licenses = [{License.FreeType: ['LICENSE.TXT']}, License.GPLv2Plus]
+    configure_tpl = "%(config-sh)s --prefix=%(prefix)s --libdir=%(libdir)s --with-harfbuzz=no"
+    deps = ['zlib', 'bzip2', 'libpng']
+
+    files_libs = ['libfreetype']
+    files_devel = ['lib/pkgconfig/freetype2.pc',
+                   'include/freetype2',
+                   'share/aclocal/freetype2.m4']

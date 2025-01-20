@@ -1,0 +1,98 @@
+ # -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+import sys
+
+
+class Recipe(recipe.Recipe):
+    name = 'gobject-introspection'
+    version = '1.56.1'
+    stype = SourceType.TARBALL
+    url = 'gnome://'
+    tarball_checksum = '5b2875ccff99ff7baab63a34b67f8c920def240e178ff50add809e267d9ea24b'
+    licenses = [License.LGPLv2Plus]
+    licenses_bins = [License.GPLv2Plus]
+    configure_options = '--with-python=python3'
+    deps = ['glib']
+    patches = [
+        # https://gitlab.gnome.org/GNOME/gobject-introspection/issues/222
+        name + '/0001-giscanner-Fix-shared-library-name-with-Meson-on-macO.patch',
+        # Taken from upstream, remove on bump
+        # https://gitlab.gnome.org/GNOME/gobject-introspection/merge_requests/73
+        name + '/0002-Fix-non-libtool-build.patch',
+        # Taken from upstream, remove on bump
+        # https://gitlab.gnome.org/GNOME/gobject-introspection/merge_requests/38
+        name + '/0003-giscanner-Fix-shared-library-name-with-Meson-on-macO.patch',
+        # Taken from upstream, remove on bump
+        # https://gitlab.gnome.org/GNOME/gobject-introspection/-/merge_requests/194
+        name + '/0001-Drop-deprecated-xml.etree.ElementTree.Element.getchi.patch',
+    ]
+
+    files_bins = ['g-ir-annotation-tool', 'g-ir-compiler', 'g-ir-doc-tool', 'g-ir-generate', 'g-ir-scanner']
+    files_libs = ['libgirepository-1.0']
+    files_typelibs = ['cairo-1.0',
+        'DBus-1.0',
+        'DBusGLib-1.0',
+        'fontconfig-2.0',
+        'freetype2-2.0',
+        'Gio-2.0',
+        'GIRepository-2.0',
+        'GL-1.0',
+        'GLib-2.0',
+        'GModule-2.0',
+        'GObject-2.0',
+        'libxml2-2.0',
+        'win32-1.0',
+        'xfixes-4.0',
+        'xft-2.0',
+        'xrandr-1.3',
+        'xlib-2.0']
+    files_gi = [
+        'lib/gobject-introspection/giscanner/__init__.py',
+        'lib/gobject-introspection/giscanner/_giscanner%(pext)s',
+        'lib/gobject-introspection/giscanner/annotationmain.py',
+        'lib/gobject-introspection/giscanner/annotationparser.py',
+        'lib/gobject-introspection/giscanner/ast.py',
+        'lib/gobject-introspection/giscanner/cachestore.py',
+        'lib/gobject-introspection/giscanner/codegen.py',
+        'lib/gobject-introspection/giscanner/collections/__init__.py',
+        'lib/gobject-introspection/giscanner/collections/counter.py',
+        'lib/gobject-introspection/giscanner/collections/ordereddict.py',
+        'lib/gobject-introspection/giscanner/docmain.py',
+        'lib/gobject-introspection/giscanner/docwriter.py',
+        'lib/gobject-introspection/giscanner/dumper.py',
+        'lib/gobject-introspection/giscanner/gdumpparser.py',
+        'lib/gobject-introspection/giscanner/girparser.py',
+        'lib/gobject-introspection/giscanner/girwriter.py',
+        'lib/gobject-introspection/giscanner/introspectablepass.py',
+        'lib/gobject-introspection/giscanner/libtoolimporter.py',
+        'lib/gobject-introspection/giscanner/maintransformer.py',
+        'lib/gobject-introspection/giscanner/message.py',
+        'lib/gobject-introspection/giscanner/scannermain.py',
+        'lib/gobject-introspection/giscanner/sectionparser.py',
+        'lib/gobject-introspection/giscanner/shlibs.py',
+        'lib/gobject-introspection/giscanner/sourcescanner.py',
+        'lib/gobject-introspection/giscanner/testcodegen.py',
+        'lib/gobject-introspection/giscanner/transformer.py',
+        'lib/gobject-introspection/giscanner/utils.py',
+        'lib/gobject-introspection/giscanner/xmlwriter.py'
+    ]
+    files_devel = [
+        'include/gobject-introspection-1.0',
+        'lib/pkgconfig/gobject-introspection-1.0.pc',
+        'lib/pkgconfig/gobject-introspection-no-export-1.0.pc',
+        'share/gobject-introspection-1.0'
+    ]
+
+    # TODO: catch the share/man stuff like man1/g-ir* ?
+    async def configure(self):
+        if self.config.target_platform in [Platform.IOS, Platform.DARWIN]:
+            if Architecture.is_arm(self.config.target_arch):
+                arch = 'arm'
+            elif self.config.target_arch == Architecture.X86:
+                arch = 'i386'
+            else:
+                arch = self.config.target_arch
+            makefilein = os.path.join (self.build_dir, 'Makefile.in')
+            replacements = {'glib-2.0/include/glibconfig.h':
+                    'glib-2.0/include/%s/glibconfig.h' % arch}
+            shell.replace(makefilein, replacements)
+        await super(Recipe, self).configure()

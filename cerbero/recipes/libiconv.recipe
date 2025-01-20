@@ -1,0 +1,27 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+
+class Recipe(recipe.Recipe):
+    name = 'libiconv'
+    version = '1.15'
+    # only libraries are LGPLv2+, tools are GPLv3+ and defined below
+    licenses = [License.LGPLv2Plus]
+    stype = SourceType.TARBALL
+    url = 'gnu://.tar.gz'
+    tarball_checksum = 'ccf536620a45458d26ba83887a983b96827001e92a13847b45e4925cc8913178'
+    patches = ['libiconv/0001-Use-correct-autotools-versions.patch',
+               'libiconv/0002-lib-Only-rename-locale_charset-for-libiconv-not-libc.patch',]
+
+    configure_options = '--disable-nls --enable-static'
+    autoreconf_sh = './autogen.sh --skip-gnulib && autoreconf -fiv'
+
+    files_bins = ['iconv', ]
+    licenses_bins = [License.GPLv3Plus]
+    files_libs = ['libiconv', 'libcharset', ]
+    files_devel = ['include/iconv.h', 'include/libcharset.h',
+                   'include/localcharset.h' ]
+
+    def prepare(self):
+        # Don't artificially force a libtool dependency when compiling as a build tool
+        if self.config.prefix == self.config.build_tools_prefix:
+            self.override_libtool = False

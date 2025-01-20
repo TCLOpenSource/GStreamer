@@ -1,0 +1,57 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+from cerbero.tools.libtool import LibtoolLibrary
+
+class Recipe(recipe.Recipe):
+    name = 'orc'
+    version = '0.4.31'
+
+    stype = SourceType.TARBALL
+    # These properties are only used when stype is TARBALL
+    url = 'https://gstreamer.freedesktop.org/src/orc/orc-%(version)s.tar.xz'
+    tarball_checksum = 'a0ab5f10a6a9ae7c3a6b4218246564c3bf00d657cbdf587e6d34ec3ef0616075'
+    # These properties are only used when stype is GIT
+    remotes = {'origin': 'https://gitlab.freedesktop.org/gstreamer/orc.git'}
+    commit = 'origin/master'
+
+    btype = BuildType.MESON
+    licenses = [{License.BSD_like: ['COPYING']}]
+    meson_options = {'benchmarks': 'disabled', 'tests': 'disabled',
+                     'tools': 'enabled', 'orc-test': 'enabled'}
+
+    files_libs = ['liborc-0.4']
+    files_devel = ['include/orc-0.4', 'lib/pkgconfig/orc-0.4.pc',
+        'share/aclocal/orc.m4', 'bin/orcc%(bext)s']
+
+    patches = [
+        # https://gitlab.freedesktop.org/gstreamer/orc/-/merge_requests/42
+        'orc/0001-orc-Implement-a-windows-helper-for-getenv.patch',
+        'orc/0002-orccodemem-Add-support-for-Universal-Windows-Platfor.patch',
+        'orc/0003-orc-Fix-some-warnings-on-MSVC-and-enable-werror.patch',
+        # https://gitlab.freedesktop.org/gstreamer/orc/-/merge_requests/48
+        'orc/0001-orc-Use-page-size-aligned-memory-block-for-Windows.patch',
+        # https://gitlab.freedesktop.org/gstreamer/orc/-/merge_requests/44
+        'orc/0001-orc-Fix-indentation.patch',
+        'orc/0002-orc-Print-hex-value-directly-instead-of-a-constant.patch',
+        'orc/0003-orc-Don-t-set-memory-protection-if-there-s-no-code.patch',
+    ]
+
+    def prepare(self):
+        # Don't build testing helper library on ios
+        if self.config.target_platform != Platform.IOS:
+            self.files_libs.append('liborc-test-0.4')
+            self.files_devel.append('bin/orc-bugreport%(bext)s')
+        else:
+            self.meson_options['orc-test'] = 'disabled'
+
+    def post_install(self):
+        dependency_libs = []
+        if self.config.target_platform == Platform.ANDROID:
+            dependency_libs += ['-lm', '-llog']
+
+        lib = LibtoolLibrary('orc-0.4', None, None, None, self.config.libdir,
+                self.config.target_platform, deps=dependency_libs)
+        lib.save()
+        if self.config.target_platform != Platform.IOS:
+            lib = LibtoolLibrary('orc-test-0.4', None, None, None, self.config.libdir,
+                    self.config.target_platform, deps=dependency_libs + ['orc-0.4']).save()
+        super().post_install()

@@ -1,0 +1,43 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+from cerbero.tools.libtool import LibtoolLibrary
+
+class Recipe(recipe.Recipe):
+    name = 'openh264'
+    version = '2.1.1'
+    url = 'https://github.com/cisco/%(name)s/archive/v%(version)s.tar.gz'
+    tarball_checksum = 'af173e90fce65f80722fa894e1af0d6b07572292e76de7b65273df4c0a8be678'
+    stype = SourceType.TARBALL
+    btype = BuildType.MESON
+    meson_options = {'tests': 'disabled'}
+    licenses = [{License.BSD: ['LICENSE']}]
+    files_libs = ['libopenh264']
+    files_devel = ['include/wels', 'lib/pkgconfig/openh264.pc']
+    patches = [
+        # https://github.com/cisco/openh264/pull/3247
+        name + "/0001-meson-add-support-for-android-ios-macos.patch",
+        name + "/0001-depend-on-gnustl-for-android.patch",
+        # https://github.com/cisco/openh264/pull/3301
+        name + "/0001-meson-Bump-requirement-to-0.50.patch",
+        name + "/0002-meson-Add-support-for-Windows-ARM-and-ARM64.patch",
+    ]
+
+    def post_install(self):
+        # XXX: Don't forget to keep this in sync with the library version!
+        dependency_libs=[]
+        if self.config.target_platform == Platform.IOS:
+            dependency_libs += ['-lc++']
+        elif self.config.target_platform == Platform.DARWIN:
+            dependency_libs += ['-lc++']
+        elif self.config.target_platform == Platform.ANDROID:
+            dependency_libs += ['gnustl', '-lm']
+        elif self.config.target_platform in [Platform.WINDOWS, Platform.LINUX]:
+            dependency_libs += ['-lstdc++', '-lm']
+        else:
+            raise NotImplementedError
+
+        libtool_la = LibtoolLibrary('openh264', 0, None, None, self.config.libdir,
+                                    self.config.target_platform,
+                                    deps=dependency_libs)
+        libtool_la.save()
+        super().post_install()

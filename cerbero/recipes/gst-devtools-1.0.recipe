@@ -1,0 +1,43 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+from cerbero.utils import shell
+from cerbero.tools.libtool import LibtoolLibrary
+
+class Recipe(custom.GStreamer):
+    name = 'gst-devtools-1.0'
+    btype = BuildType.MESON
+    meson_options = {'debug_viewer': 'disabled'}
+    tarball_checksum = '2c64037c823fb88751a47dacf3d4752a52b7951190d6e05fc44855e912e81d71'
+    deps = ['gstreamer-1.0', 'gst-plugins-base-1.0', 'json-glib', 'gst-rtsp-server-1.0']
+
+    files_bins = ['gst-validate-1.0', 'gst-validate-transcoding-1.0', 'gst-validate-media-check-1.0',
+                  'gst-validate-rtsp-server-1.0']
+    files_libs = ['libgstvalidate-1.0']
+
+    files_devel = ["include/gstreamer-1.0/gst/validate/*.h",
+                   "lib/pkgconfig/gst-validate-1.0.pc"]
+
+    files_validate = ["lib/gst-validate-launcher/python/launcher/",
+                      "lib/gst-validate-launcher/",
+                      'bin/gst-validate-launcher',
+                      "share/gstreamer-1.0/validate/scenarios/*.scenario"
+    ]
+
+    files_typelibs = [
+        'GstValidate-1.0'
+    ]
+
+    def prepare(self):
+        if self.config.target_platform == Platform.LINUX:
+            self.files_libs.append("libgstvalidate-default-overrides-1.0")
+
+        if self.config.platform != Platform.WINDOWS:
+            # validatedefaultinjection plugin isn't built on Windows
+            self.files_gst_validate_plugins = ['lib/gstreamer-1.0/validate/libgstvalidatefaultinjection%(mext)s']
+
+    def post_install(self):
+        super().post_install()
+
+        if self.config.target_platform == Platform.LINUX:
+            LibtoolLibrary('gstvalidate-default-overrides-1.0',
+                    None, None, None, self.config.libdir,
+                    self.config.target_platform, deps=['gstvalidate-1.0']).save()

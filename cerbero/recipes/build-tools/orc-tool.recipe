@@ -1,0 +1,25 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+
+class Recipe(recipe.Recipe):
+    name = 'orc-tool'
+    version = '0.4.31'
+
+    stype = SourceType.TARBALL
+    # These properties are only used when stype is TARBALL
+    url = 'https://gstreamer.freedesktop.org/src/orc/orc-%(version)s.tar.xz'
+    tarball_checksum = 'a0ab5f10a6a9ae7c3a6b4218246564c3bf00d657cbdf587e6d34ec3ef0616075'
+    tarball_dirname = 'orc-%(version)s'
+    # These properties are only used when stype is GIT
+    remotes = {'origin': 'https://gitlab.freedesktop.org/gstreamer/orc.git'}
+    commit = 'origin/master'
+
+    btype = BuildType.MESON
+    licenses = [{License.BSD_like: ['COPYING']}]
+    meson_options = {'benchmarks': 'disabled', 'tests': 'disabled',
+                     'tools': 'enabled', 'orc-test': 'enabled'}
+
+    files_libs = ['liborc-0.4', 'liborc-test-0.4']
+    files_devel = ['include/orc-0.4', 'lib/pkgconfig/orc-0.4.pc',
+        'bin/orc-bugreport%(bext)s', 'share/aclocal/orc.m4',
+        'bin/orcc%(bext)s']

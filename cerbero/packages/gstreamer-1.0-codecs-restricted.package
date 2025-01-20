@@ -1,0 +1,29 @@
+# vi:si:et:sw=4:sts=4:ts=4:syntax=python
+# -*- Mode: Python -*-
+
+
+class Package(custom.GStreamer, package.Package):
+
+    name = 'gstreamer-1.0-codecs-restricted'
+    shortdesc = 'GStreamer 1.0 restricted codecs with potential patent issues in some countries'
+    longdesc = 'GStreamer 1.0 restricted codecs with potential patent issues in some countries'
+    uuid = '0a4e77e8-3c8c-4e7d-890b-1538d36f1816'
+    deps = ['gstreamer-1.0-core']
+
+    files = ['a52dec:libs', 'opencore-amr:libs',
+             'libdca:libs', 'vo-aacenc:libs', 'x264:libs',
+             'gst-plugins-ugly-1.0:plugins_codecs_restricted',
+             'gst-plugins-bad-1.0:plugins_codecs_restricted']
+    files_devel = ['gst-plugins-ugly-1.0:plugins_codecs_restricted_devel',
+                   'gst-plugins-bad-1.0:plugins_codecs_restricted_devel']
+
+    def prepare(self):
+        # Recipes that need autoreconf hang on the Windows CI
+        if self.config.platform == Platform.WINDOWS:
+            self.files.remove('a52dec:libs')
+
+        if self.config.variants.uwp:
+            self.files = [
+                'gst-plugins-ugly-1.0:plugins_codecs_restricted',
+                'gst-plugins-bad-1.0:plugins_codecs_restricted',
+            ]

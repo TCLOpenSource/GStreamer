@@ -1,0 +1,20 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+import shutil
+from cerbero.utils import shell
+
+
+class Recipe(recipe.Recipe):
+    name = 'gas-preprocessor'
+    version = '0.0.0'
+    licenses = [License.GPLv2Plus]
+    btype = BuildType.CUSTOM
+    remotes = {'origin': 'https://github.com/libav/gas-preprocessor'}
+    commit = 'd09971fad329d32df19f5bbafe88cf2f0ed04ed7'
+
+    async def install(self):
+        if not os.path.exists(os.path.join(self.config.prefix, 'bin')):
+            os.makedirs(os.path.join(self.config.prefix, 'bin'))
+        shutil.copy (os.path.join(self.build_dir, 'gas-preprocessor.pl'),
+                     os.path.join(self.config.prefix, 'bin'))
+        await shell.async_call ('chmod +x %s' %
+                os.path.join(self.config.prefix, 'bin', 'gas-preprocessor.pl'), env=self.env)

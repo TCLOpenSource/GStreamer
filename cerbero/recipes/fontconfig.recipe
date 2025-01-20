@@ -1,0 +1,56 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+import os
+from cerbero.tools.libtool import LibtoolLibrary
+from cerbero.tools.libtool import get_libtool_versions
+
+class Recipe(recipe.Recipe):
+    name = 'fontconfig'
+    version = '2.14.1'
+    stype = SourceType.TARBALL
+    url = 'https://www.freedesktop.org/software/fontconfig/release/fontconfig-%(version)s.tar.xz'
+    tarball_checksum = '298e883f6e11d2c5e6d53c8a8394de58d563902cfab934e6be12fb5a5f361ef0'
+    licenses = [{License.MIT: ['COPYING']}]
+    btype = BuildType.MESON
+    meson_options = {
+        'doc': 'disabled',
+        'tests': 'disabled',
+        'tools': 'disabled',
+        'c_std': 'gnu99',
+    }
+    deps = ['expat', 'freetype', 'zlib', 'bzip2']
+    patches = [
+        # Proper fix is pending, upstream issue is:
+        # https://gitlab.freedesktop.org/fontconfig/fontconfig/-/issues/247
+        'fontconfig/0001-fcobjs-Remove-duplicate-function-prototypes.patch',
+    ]
+
+    files_libs = ['libfontconfig']
+    files_etc = [
+        'etc/fonts/conf.d',
+        'etc/fonts/fonts.conf',
+        'share/fontconfig'
+        ]
+    files_devel = ['lib/pkgconfig/fontconfig.pc', 'include/fontconfig']
+
+
+    def prepare(self):
+        if self.config.target_platform in (Platform.WINDOWS, Platform.ANDROID):
+            self.deps.append('libiconv')
+
+    def post_install(self):
+        # Meson does not generate la files
+        major, minor, micro = get_libtool_versions(self.version)
+        libtool_la = LibtoolLibrary('fontconfig', major, minor, micro,
+                                    self.config.libdir, self.config.target_platform,
+                                    deps=['expat', 'freetype', 'bz2', 'z'])
+        libtool_la.save()
+        # Create relative symlinks to prevent breakage during packaging
+        if self.config.platform != Platform.WINDOWS:
+            confddir = os.path.join(self.config.prefix, 'etc', 'fonts', 'conf.d')
+            linksrc = os.path.join('..', '..', '..', 'share', 'fontconfig', 'conf.avail')
+            for f in os.listdir(confddir):
+                if not f.endswith('.conf'):
+                    continue
+                os.remove(os.path.join(confddir, f))
+                os.symlink(os.path.join(linksrc, f), os.path.join(confddir, f))
+        super().post_install()

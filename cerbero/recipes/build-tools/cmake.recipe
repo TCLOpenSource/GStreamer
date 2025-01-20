@@ -1,0 +1,42 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+
+
+class Recipe(recipe.Recipe):
+    name = 'cmake'
+    version = '3.22.2'
+    licenses = [{License.BSD_like: ['Copyright.txt']}]
+    btype = BuildType.MAKEFILE
+    stype = SourceType.TARBALL
+    url = 'https://github.com/Kitware/CMake/releases/download/v%(version)s/cmake-%(version)s.tar.gz'
+    tarball_checksum = '3c1c478b9650b107d452c5bd545c72e2fad4e37c09b89a1984b9a2f46df6aced'
+    deps = ['autoconf']
+
+    add_host_build_target = False
+    config_sh = './bootstrap'
+    configure_tpl = "%(config-sh)s --prefix=%(prefix)s"
+    can_use_configure_cache = False
+
+    files_bins = ['cmake', 'cpack', 'ctest']
+    platform_files_bins = {
+        Platform.DARWIN : ['ccmake']
+    }
+
+    def prepare(self):
+        if self.config.target_platform == Platform.WINDOWS:
+            if self.config.target_arch == Architecture.X86_64:
+                # Setting SYSTEM_NAME sets CMAKE_CROSSCOMPILING and the
+                # binutils such as ar and ranlib are prefixed correctly
+                self.configure_tpl += ' -- -DCMAKE_SYSTEM_NAME="Windows"'
+
+    async def configure(self):
+        if self.config.target_platform == Platform.WINDOWS:
+            if self.config.target_arch == Architecture.X86_64:
+                # Bootstrap needs to be run twice for some dark reason
+                try:
+                    await super(recipe.Recipe, self).configure()
+                except:
+                    pass
+        await super(recipe.Recipe, self).configure()
+        # Windows XP does not have _mkgmtime64
+        shell.replace(os.path.join(self.build_dir, 'CMakeCache.txt'),
+            {'HAVE__MKGMTIME64:INTERNAL=1':'HAVE__MKGMTIME64:INTERNAL='})

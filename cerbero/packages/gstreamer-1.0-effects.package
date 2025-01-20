@@ -1,0 +1,28 @@
+# vi:si:et:sw=4:sts=4:ts=4:syntax=python
+# -*- Mode: Python -*-
+
+
+class Package(custom.GStreamer, package.Package):
+
+    name = 'gstreamer-1.0-effects'
+    shortdesc = 'GStreamer 1.0 effects and instrumentation plugins'
+    longdesc = 'GStreamer 1.0 effects and instrumentation plugins'
+    uuid = '4be3f88b-b552-4cd7-aecd-cf935fe270f7'
+    deps = ['gstreamer-1.0-core']
+
+    files = ['ladspa:libs',
+             'gst-plugins-base-1.0:plugins_effects',
+             'gst-plugins-good-1.0:plugins_effects',
+             'gst-plugins-ugly-1.0:plugins_effects',
+             'gst-plugins-bad-1.0:plugins_effects']
+    files_devel = [
+            'gst-plugins-base-1.0:plugins_effects_devel',
+            'gst-plugins-good-1.0:plugins_effects_devel',
+            'gst-plugins-ugly-1.0:plugins_effects_devel',
+            'gst-plugins-bad-1.0:plugins_effects_devel']
+
+    def prepare(self):
+        if not self.config.variants.visualstudio:
+            self.files += ['soundtouch:libs', 'webrtc-audio-processing:libs']
+        if self.config.variants.uwp:
+            self.files.remove('ladspa:libs')

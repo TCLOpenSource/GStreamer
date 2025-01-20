@@ -1,0 +1,225 @@
+# -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+from cerbero.build.build import modify_environment
+from cerbero.tools.libtool import LibtoolLibrary
+from cerbero.utils import shell, messages
+
+class Recipe(recipe.Recipe):
+    name = 'openssl'
+    # Note: openssl helpfully moves tarballs somewhere else (old/x.y.z/)
+    # whenever a new release comes out, so make sure to mirror to fdo when
+    # bumping the release!
+    version = '1.1.1s'
+    licenses = [{License.OPENSSL: ['LICENSE']}]
+    stype = SourceType.TARBALL
+    url = 'https://ftp.openssl.org/source/{0}-{1}.tar.gz'.format(name, version)
+    tarball_checksum = 'c5ac01e760ee6ff0dab61d6b2bbd30146724d063eb322180c6f18a6f74e4b6aa'
+    deps = ['ca-certificates', 'zlib']
+    # Parallel make fails randomly due to undefined macros, probably races
+    allow_parallel_build = False
+    # Configure script is perl, not shell
+    config_sh_needs_shell = False
+    # Can build for MSVC and UWP
+    can_msvc = True
+
+    patches = [
+        # Portable prefix with SSL certs
+        'openssl/0001-Load-ca-certificate.crt-from-PREFIX-etc-ssl-on-macOS.patch',
+        # MSVC and UWP support
+        'openssl/0001-windows-makefile.tmpl-Generate-and-install-pkgconfig.patch',
+        'openssl/0002-windows-makefile.tmpl-Fix-ONECORE-build.patch',
+        'openssl/0003-windows-makefile.tmpl-Do-not-prefix-import-libraries.patch',
+        # https://github.com/openssl/openssl/pull/12400
+        'openssl/0001-crypto-win-Don-t-use-disallowed-APIs-on-UWP.patch',
+        'openssl/0002-win-onecore-Build-with-APPCONTAINER-for-UWP-compat.patch',
+    ]
+
+    files_bins = ['openssl']
+    files_libs = ['libcrypto', 'libssl']
+    files_devel = ['include/openssl', 'lib/pkgconfig/openssl.pc',
+                   'lib/pkgconfig/libssl.pc', 'lib/pkgconfig/libcrypto.pc']
+
+    def _get_openssl_platform(self):
+        # map platforms
+        if self.config.target_platform == Platform.IOS:
+            if self.config.target_arch == Architecture.ARMv7:
+                return 'BSD-generic32'
+            if self.config.target_arch == Architecture.ARMv7S:
+                return 'BSD-generic32'
+            if self.config.target_arch == Architecture.X86:
+                return 'BSD-generic32'
+            if self.config.target_arch == Architecture.X86_64:
+                return 'BSD-generic64'
+            if self.config.target_arch == Architecture.ARM64:
+                return 'BSD-generic64'
+            raise InvalidRecipeError(self, "Unknown iOS platform")
+        if self.config.target_platform == Platform.ANDROID:
+            self.make += ['CROSS_SYSROOT=' + self.config.sysroot]
+            if self.config.target_arch == Architecture.ARM:
+                return 'android-arm'
+            if self.config.target_arch == Architecture.ARMv7:
+                return 'android-arm'
+            if self.config.target_arch == Architecture.ARM64:
+                return 'android-arm64'
+            if self.config.target_arch == Architecture.X86:
+                return 'android-x86'
+            if self.config.target_arch == Architecture.X86_64:
+                return 'android-x86_64'
+            raise InvalidRecipeError(self, "Unknown Android platform")
+        if self.config.target_platform == Platform.DARWIN:
+            if self.config.target_arch == Architecture.X86:
+                return 'darwin-i386-cc'
+            if self.config.target_arch == Architecture.X86_64:
+                return 'darwin64-x86_64-cc'
+            if self.config.target_arch == Architecture.ARM64:
+                return 'darwin64-arm64-cc'
+            raise InvalidRecipeError(self, "Unknown macOS platform")
+        if self.config.target_platform == Platform.LINUX:
+            if self.config.target_arch == Architecture.X86:
+                return 'linux-elf'
+            if self.config.target_arch == Architecture.X86_64:
+                return 'linux-x86_64'
+            if self.config.target_arch == Architecture.ARM:
+                return 'linux-armv4'
+            if self.config.target_arch == Architecture.ARMv7:
+                return 'linux-armv4'
+            if self.config.target_arch == Architecture.ARM64:
+                return 'linux-aarch64'
+            raise InvalidRecipeError(self, "Unknown Linux platform")
+        if self.config.target_platform == Platform.WINDOWS:
+            if self.using_uwp():
+                if self.config.target_arch == Architecture.X86:
+                    return 'VC-WIN32-ONECORE'
+                if self.config.target_arch == Architecture.X86_64:
+                    return 'VC-WIN64A-ONECORE'
+                if self.config.target_arch == Architecture.ARM:
+                    return 'VC-WIN32-ARM'
+                if self.config.target_arch == Architecture.ARMv7:
+                    return 'VC-WIN32-ARM'
+                if self.config.target_arch == Architecture.ARM64:
+                    return 'VC-WIN64-ARM'
+            elif self.using_msvc():
+                if self.config.target_arch == Architecture.X86:
+                    return 'VC-WIN32'
+                if self.config.target_arch == Architecture.X86_64:
+                    return 'VC-WIN64A'
+            else:
+                if self.config.target_arch == Architecture.X86:
+                    return 'mingw'
+                if self.config.target_arch == Architecture.X86_64:
+                    return 'mingw64'
+            raise InvalidRecipeError(self, "Unknown Windows platform")
+        raise InvalidRecipeError(self, "Unknown target platform {}"
+                                 .format(self.config.target_platform))
+
+    def prepare(self):
+        self.openssl_platform = self._get_openssl_platform()
+        # Need this include first, otherwise on compilation openssl will prefer
+        # the headers in the prefix over those in its sources dir
+        srcdir_include = f'-I{self.config_src_dir}/include '
+        cflags = srcdir_include + self.get_env('CFLAGS')
+        ldflags = self.get_env('LDFLAGS')
+
+        if self.using_msvc():
+            # Gets converted to C:/MinGW/msys/1.0/utf-8 by MSYS somehow, so
+            # just remove it. We only need this for gstreamer sources anyway.
+            cflags = cflags.replace('/utf-8', '')
+            # If we don't unset these, they override values set by openssl's makefile
+            self.set_env('CFLAGS')
+            self.set_env('CPPFLAGS')
+            self.set_env('CXXFLAGS')
+            self.set_env('LDFLAGS')
+            # Building with MSVC uses nmake, not make
+            self.make = ['nmake', 'CFLAG=' + cflags, 'LDFLAG=' + ldflags]
+            self.make_install = ['nmake', 'install_sw']
+        else:
+            cflags += '-fPIC -DOPENSSL_PIC'
+            ldflags += '-fPIC'
+            ranlib = self.get_env('RANLIB')
+            ar = self.get_env('AR')
+            # Need to add CFLAGS to CC because CFLAG is not used everywhere in the
+            # build, and we can't pass arguments via Configure because on Darwin,
+            # Configure reads the `-arch x86_64` as meaning that you want to use
+            # `x86_64` as the platform, and errors out about a redefined platform.
+            cc = self.get_env('CC') + ' ' + srcdir_include + self.get_env('CFLAGS')
+            ld = self.get_env('LD') + ' ' + self.get_env('LDFLAGS')
+            # NOTE: CFLAG and LDFLAG are not typos!
+            self.make += ['AR=' + ar, 'RANLIB=' + ranlib, 'CC=' + cc, 'LD=' + ld,
+                          'CFLAG=' + cflags, 'LDFLAG=' + ldflags]
+            self.make_install = ['make', 'install_sw', 'RANLIB=' + ranlib]
+
+        # We probably don't need and can't use the tools on these platforms
+        if self.config.target_platform in (Platform.IOS, Platform.ANDROID):
+            self.make += ['build_libs', 'openssl.pc', 'libssl.pc', 'libcrypto.pc']
+            self.make_install = ['make', 'install_dev', 'RANLIB=' + ranlib]
+
+        if self.config.platform == Platform.WINDOWS:
+            # Msys ships with a too-old perl, so we modify PATH to use the
+            # mingw-perl that was downloaded and installed by bootstrap.
+            openssl_path = os.path.join(self.config.mingw_perl_prefix, 'bin')
+            self.prepend_env('PATH', openssl_path, sep=';')
+            # Ensure that our Perl's File/Spec.pm uses backward slashes when
+            # building for MSVC and forward-slashes when building for MinGW.
+            # The vars for the MinGW case are automatically set by the MSYS
+            # terminal, but they might get overriden by something, which will
+            # cause Perl to use backward slashes and fail
+            # `Configurations/unix-checker.pm` on configure.
+            self.set_env('MSYSTEM', 'MINGW32')
+            if self.using_msvc():
+                self.set_env('TERM', 'dumb')
+            else:
+                self.set_env('TERM', 'cygwin')
+
+
+    @modify_environment
+    async def configure(self):
+        if self.config.platform == Platform.WINDOWS:
+            perl, found, newer = shell.check_tool_version('perl','5.10.0', env=self.env)
+            m = 'please run bootstrap again'
+            if newer is None:
+                raise FatalError('Perl not found, ' + m)
+            if newer is False:
+                raise FatalError('Configured Perl {!r} is {} which is too old, {}'
+                                 ''.format(perl, found, m))
+        # OpenSSL guesses the libdir incorrectly on x86_64
+        config_sh = 'perl ./Configure --prefix=' + self.config.prefix + \
+            ' --libdir=lib' + self.config.lib_suffix + '  no-makedepend '
+        if self.config.target_platform == Platform.IOS:
+            # Note: disable 'no-devcryptoeng' when we finally target the
+            # *real* ios configuration targets
+            config_sh += ' no-shared no-dso no-async no-devcryptoeng '
+            # Undefined symbols in aesni_* in libcrypto.a only on x86_64
+            if self.config.target_arch == Architecture.X86_64:
+                config_sh += ' no-asm '
+        else:
+            config_sh += ' shared '
+
+        # ssl3 is needed by sphinx which is used by gst-validate, which tries
+        # to use this libssl and fails with undefined symbols. md2 is needed by
+        # librpmio.so.8, which is used during package generation on Fedora.
+        if self.config.target_platform == Platform.LINUX:
+            config_sh += ' enable-ssl3 enable-ssl3-method enable-md2 '
+
+        if self.using_msvc():
+            if self.config.variants.vscrt == 'md':
+                config_sh += ' --release '
+            elif self.config.variants.vscrt == 'mdd':
+                config_sh += ' --debug '
+            else:
+                raise AssertionError
+
+        await shell.async_call(config_sh + self.openssl_platform, self.build_dir,
+                               logfile=self.logfile, env=self.env)
+
+    def post_install(self):
+        # XXX: Don't forget to update this when the soname is bumped!
+        # We don't build shared libraries on iOS as the build system
+        # of openssl is broken and iOS does not support them anyway.
+        if self.config.target_platform != Platform.IOS:
+            libtool_la = LibtoolLibrary('ssl', 1, 1, 0, self.config.libdir,
+                                        self.config.target_platform,
+                                        deps=['crypto'])
+            libtool_la.save()
+            libtool_la = LibtoolLibrary('crypto', 1, 1, 0, self.config.libdir,
+                                        self.config.target_platform)
+            libtool_la.save()
+        super().post_install()

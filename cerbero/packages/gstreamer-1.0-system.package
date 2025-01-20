@@ -1,0 +1,34 @@
+# vi:si:et:sw=4:sts=4:ts=4:syntax=python
+# -*- Mode: Python -*-
+
+
+class Package(custom.GStreamer, package.Package):
+
+    name = 'gstreamer-1.0-system'
+    shortdesc = 'GStreamer 1.0 system plugins'
+    longdesc = 'GStreamer 1.0 system plugins'
+    uuid = 'fe9b6b9e-0817-4a2f-9838-44e1d9377435'
+    deps = ['gstreamer-1.0-core']
+
+    files = ['gst-plugins-base-1.0:plugins_sys', 'gst-plugins-good-1.0:plugins_sys',
+            'gst-plugins-ugly-1.0:plugins_sys', 'gst-plugins-bad-1.0:plugins_sys',
+            'graphene:libs']
+    files_devel = ['gst-plugins-base-1.0:plugins_sys_devel',
+            'gst-plugins-good-1.0:plugins_sys_devel',
+            'gst-plugins-ugly-1.0:plugins_sys_devel',
+            'gst-plugins-bad-1.0:plugins_sys_devel']
+
+    platform_files = {
+      Platform.IOS : ['moltenvk:libs'],
+      Platform.DARWIN : ['moltenvk:libs'],
+    }
+
+    def prepare(self):
+        if self.config.variants.cdparanoia:
+            self.files += ['cdparanoia:libs']
+
+        if self.config.variants.uwp:
+            self.files.remove('graphene:libs')
+            if self.config.target_arch in (Architecture.X86, Architecture.X86_64, Architecture.ARM64, Architecture.UNIVERSAL):
+                self.files.append('angle-uwp:libs')
+                self.files_devel.append('angle-uwp:headers')
