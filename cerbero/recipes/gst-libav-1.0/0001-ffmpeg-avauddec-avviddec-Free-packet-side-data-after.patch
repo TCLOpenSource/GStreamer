@@ -1,0 +1,63 @@
+From 719d0aa17f7ad75db00bd0731ea0a5e05dd4d2ad Mon Sep 17 00:00:00 2001
+From: TCLCode <opensource@tcl.com>
+Date: Tue, 11 Feb 2025 15:17:26 +0800
+Subject: [PATCH] ffmpeg: avauddec/avviddec: Free packet side data after usage
+
+---
+ subprojects/gst-libav/ext/libav/gstavauddec.c | 2 ++
+ subprojects/gst-libav/ext/libav/gstavviddec.c | 8 +++++---
+ 2 files changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/subprojects/gst-libav/ext/libav/gstavauddec.c b/subprojects/gst-libav/ext/libav/gstavauddec.c
+index 7415143b22..7ba04f0d59 100644
+--- a/subprojects/gst-libav/ext/libav/gstavauddec.c
++++ b/subprojects/gst-libav/ext/libav/gstavauddec.c
+@@ -726,8 +726,10 @@ gst_ffmpegauddec_handle_frame (GstAudioDecoder * decoder, GstBuffer * inbuf)
+     goto unmap;
+ 
+   if (avcodec_send_packet (ffmpegdec->context, &packet) < 0) {
++    av_packet_free_side_data (&packet);
+     goto send_packet_failed;
+   }
++  av_packet_free_side_data (&packet);
+ 
+   do {
+     /* decode a frame of audio now */
+diff --git a/subprojects/gst-libav/ext/libav/gstavviddec.c b/subprojects/gst-libav/ext/libav/gstavviddec.c
+index 9d45f84c78..e2758c788b 100644
+--- a/subprojects/gst-libav/ext/libav/gstavviddec.c
++++ b/subprojects/gst-libav/ext/libav/gstavviddec.c
+@@ -2048,6 +2048,9 @@ gst_ffmpegviddec_handle_frame (GstVideoDecoder * decoder,
+   /* now decode the frame */
+   gst_avpacket_init (&packet, data, size);
+ 
++  if (!packet.size)
++    goto done;
++
+   if (ffmpegdec->palette) {
+     guint8 *pal;
+ 
+@@ -2057,9 +2060,6 @@ gst_ffmpegviddec_handle_frame (GstVideoDecoder * decoder,
+     GST_DEBUG_OBJECT (ffmpegdec, "copy pal %p %p", &packet, pal);
+   }
+ 
+-  if (!packet.size)
+-    goto done;
+-
+   /* save reference to the timing info */
+   ffmpegdec->context->reordered_opaque = (gint64) frame->system_frame_number;
+   ffmpegdec->picture->reordered_opaque = (gint64) frame->system_frame_number;
+@@ -2075,8 +2075,10 @@ gst_ffmpegviddec_handle_frame (GstVideoDecoder * decoder,
+   GST_VIDEO_DECODER_STREAM_UNLOCK (ffmpegdec);
+   if (avcodec_send_packet (ffmpegdec->context, &packet) < 0) {
+     GST_VIDEO_DECODER_STREAM_LOCK (ffmpegdec);
++    av_packet_free_side_data (&packet);
+     goto send_packet_failed;
+   }
++  av_packet_free_side_data (&packet);
+   GST_VIDEO_DECODER_STREAM_LOCK (ffmpegdec);
+ 
+   do {
+-- 
+2.25.1
+
