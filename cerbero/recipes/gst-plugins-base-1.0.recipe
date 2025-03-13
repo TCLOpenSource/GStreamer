@@ -20,6 +20,10 @@ class Recipe(custom.GStreamer):
     deps = ['glib', 'gstreamer-1.0', 'libogg', 'pango', 'libtheora',
             'libvorbis', 'zlib', 'orc', 'opus', 'graphene',
             'libjpeg-turbo', 'libpng']
+    patches = [
+        name + '/0001-TCL-modifications-for-gst-plugins-base.patch',
+    ]
+
     platform_deps = {Platform.ANDROID: [ 'tremor' ], Platform.IOS: [ 'tremor' ] }
     use_system_libs = True
 

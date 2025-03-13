@@ -1,0 +1,711 @@
+From 4504cdf75542b4ea3ea458c74416883aa889b5f2 Mon Sep 17 00:00:00 2001
+From: TCLCode <opensource@tcl.com>
+Date: Thu, 6 Mar 2025 13:43:01 +0800
+Subject: [PATCH] TCL modifications for gst-plugins-ugly
+
+---
+ .../gst-plugins-ugly/gst/asfdemux/asfpacket.c |  89 +++++
+ .../gst-plugins-ugly/gst/asfdemux/asfpacket.h |   4 +
+ .../gst-plugins-ugly/gst/asfdemux/gstasf.c    |   2 +
+ .../gst/asfdemux/gstasfdemux.c                | 313 +++++++++++++++++-
+ .../gst/asfdemux/gstasfdemux.h                |   9 +
+ subprojects/gst-plugins-ugly/meson.build      |   8 +-
+ 6 files changed, 416 insertions(+), 9 deletions(-)
+
+diff --git a/subprojects/gst-plugins-ugly/gst/asfdemux/asfpacket.c b/subprojects/gst-plugins-ugly/gst/asfdemux/asfpacket.c
+index d25abbe409..a1ff890989 100644
+--- a/subprojects/gst-plugins-ugly/gst/asfdemux/asfpacket.c
++++ b/subprojects/gst-plugins-ugly/gst/asfdemux/asfpacket.c
+@@ -446,6 +446,10 @@ gst_asf_demux_parse_payload (GstASFDemux * demux, AsfPacket * packet,
+ 
+     if (payload.rep_data_len >= 8) {
+       payload.mo_size = GST_READ_UINT32_LE (payload.rep_data);
++#ifdef TCL_PATCH
++      if (payload.mo_size > 1024 * 1024 *5)
++        return FALSE;
++#endif
+       payload.ts = GST_READ_UINT32_LE (payload.rep_data + 4) * GST_MSECOND;
+       if (G_UNLIKELY (payload.ts < demux->preroll))
+         payload.ts = 0;
+@@ -806,3 +810,88 @@ done:
+   gst_buffer_unmap (buf, &map);
+   return ret;
+ }
++
++#ifdef TCL_PATCH
++gboolean gst_asf_demux_parse_packet_time(GstASFDemux * demux, GstBuffer * buf, gint64 *SCR, gint64 *duration)
++{
++  GstMapInfo map;
++  const guint8 *data;
++  gboolean has_multiple_payloads;
++  gboolean ret = FALSE;
++  guint8 ec_flags, flags1;
++  guint size;
++  guint         tmp_value;
++  guint8        prop_flags;
++
++  if (buf == NULL || SCR == NULL || duration == NULL)
++    return FALSE;
++
++  gst_buffer_map (buf, &map, GST_MAP_READ);
++  data = map.data;
++  size = map.size;
++
++  /* need at least two payload flag bytes, send time, and duration */
++  if (G_UNLIKELY (size < 2 + 4 + 2)) {
++    GST_WARNING_OBJECT (demux, "Packet size is < 8");
++    goto done;
++  }
++
++  ec_flags = GST_READ_UINT8 (data);
++
++  /* skip optional error correction stuff */
++  if ((ec_flags & 0x80) != 0) {
++    guint ec_len_type, ec_len;
++
++    ec_len_type = (ec_flags & 0x60) >> 5;
++    if (ec_len_type == 0) {
++      ec_len = ec_flags & 0x0f;
++    } else {
++      GST_WARNING_OBJECT (demux, "unexpected error correction length type %u",
++          ec_len_type);
++      ec_len = 2;
++    }
++    GST_LOG_OBJECT (demux, "packet has error correction (%u bytes)", ec_len);
++
++    /* still need at least two payload flag bytes, send time, and duration */
++    if (size <= (1 + ec_len) + 2 + 4 + 2) {
++      goto done;
++    }
++
++    data += 1 + ec_len;
++    size -= 1 + ec_len;
++  }
++
++  /* parse payload info */
++  flags1 = GST_READ_UINT8 (data);
++  prop_flags = GST_READ_UINT8 (data + 1);
++
++  data += 2;
++  size -= 2;
++
++  has_multiple_payloads = (flags1 & 0x01) != 0;
++
++  tmp_value = asf_packet_read_varlen_int (flags1, 5, &data, &size); //length
++
++  tmp_value = asf_packet_read_varlen_int (flags1, 1, &data, &size); // sequence
++
++  tmp_value = asf_packet_read_varlen_int (flags1, 3, &data, &size); // padding
++
++  if (G_UNLIKELY (size < 6)) {
++    GST_WARNING_OBJECT (demux, "Packet size is < 6");
++    goto done;
++  }
++
++  *SCR = GST_READ_UINT32_LE (data) * GST_MSECOND;
++  *duration = GST_READ_UINT16_LE (data + 4) * GST_MSECOND;
++  GST_LOG_OBJECT (demux, "send time        : %" GST_TIME_FORMAT,
++      GST_TIME_ARGS (*SCR));
++
++  GST_LOG_OBJECT (demux, "duration         : %" GST_TIME_FORMAT,
++      GST_TIME_ARGS (*duration));
++  ret = TRUE;
++done:
++  gst_buffer_unmap (buf, &map);
++  return ret;
++}
++#endif
++
+diff --git a/subprojects/gst-plugins-ugly/gst/asfdemux/asfpacket.h b/subprojects/gst-plugins-ugly/gst/asfdemux/asfpacket.h
+index a812e74d14..2546fd9033 100644
+--- a/subprojects/gst-plugins-ugly/gst/asfdemux/asfpacket.h
++++ b/subprojects/gst-plugins-ugly/gst/asfdemux/asfpacket.h
+@@ -65,6 +65,10 @@ typedef enum {
+ 
+ GstAsfDemuxParsePacketError gst_asf_demux_parse_packet (GstASFDemux * demux, GstBuffer * buf);
+ 
++#ifdef TCL_PATCH
++gboolean gst_asf_demux_parse_packet_time(GstASFDemux * demux, GstBuffer * buf, gint64 *SCR, gint64 *duration);
++#endif
++
+ #define gst_asf_payload_is_complete(payload) \
+     ((payload)->buf_filled >= (payload)->mo_size)
+ 
+diff --git a/subprojects/gst-plugins-ugly/gst/asfdemux/gstasf.c b/subprojects/gst-plugins-ugly/gst/asfdemux/gstasf.c
+index 73a7db2997..c3356ca055 100644
+--- a/subprojects/gst-plugins-ugly/gst/asfdemux/gstasf.c
++++ b/subprojects/gst-plugins-ugly/gst/asfdemux/gstasf.c
+@@ -36,8 +36,10 @@ plugin_init (GstPlugin * plugin)
+   gboolean ret = FALSE;
+ 
+   ret |= GST_ELEMENT_REGISTER (asfdemux, plugin);
++#ifndef TCL_PATCH
+   ret |= GST_ELEMENT_REGISTER (rtspwms, plugin);
+   ret |= GST_ELEMENT_REGISTER (rtpasfdepay, plugin);
++#endif
+ /*
+   if (!gst_element_register (plugin, "asfmux", GST_RANK_NONE, GST_TYPE_ASFMUX))
+     return FALSE;
+diff --git a/subprojects/gst-plugins-ugly/gst/asfdemux/gstasfdemux.c b/subprojects/gst-plugins-ugly/gst/asfdemux/gstasfdemux.c
+index 0c8dc848c9..64a1a40cb2 100644
+--- a/subprojects/gst-plugins-ugly/gst/asfdemux/gstasfdemux.c
++++ b/subprojects/gst-plugins-ugly/gst/asfdemux/gstasfdemux.c
+@@ -47,7 +47,9 @@
+ #include "gstasfdemux.h"
+ #include "asfheaders.h"
+ #include "asfpacket.h"
+-
++#ifdef TCL_PATCH
++#include <sys/system_properties.h>
++#endif
+ GST_DEBUG_CATEGORY (asfdemux_dbg);
+ #define GST_CAT_DEFAULT asfdemux_dbg
+ 
+@@ -117,6 +119,10 @@ static GstStructure *gst_asf_demux_get_metadata_for_stream (GstASFDemux * d,
+ static GstFlowReturn gst_asf_demux_push_complete_payloads (GstASFDemux * demux,
+     gboolean force);
+ 
++#ifdef TCL_PATCH
++static void gst_asf_demux_demux_remove_pad(GstElement *element, GstPad *pad);
++#endif
++
+ #define gst_asf_demux_parent_class parent_class
+ G_DEFINE_TYPE (GstASFDemux, gst_asf_demux, GST_TYPE_ELEMENT);
+ GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (asfdemux, "asfdemux", GST_RANK_SECONDARY,
+@@ -290,9 +296,18 @@ gst_asf_demux_reset (GstASFDemux * demux, gboolean chain_reset)
+   g_free (demux->sidx_entries);
+   demux->sidx_entries = NULL;
+ 
++#ifdef TCL_PATCH
++  //parse more payload packet,because first packet may not have a video or audio
++  demux->speed_packets = 10;
++#else
+   demux->speed_packets = 1;
++#endif
+ 
+   demux->asf_3D_mode = GST_ASF_3D_NONE;
++#ifdef TCL_PATCH
++  demux->file_size = 0;
++  demux->fix_info = TRUE;
++#endif
+ 
+   if (chain_reset) {
+     GST_LOG_OBJECT (demux, "Restarting");
+@@ -330,6 +345,11 @@ gst_asf_demux_init (GstASFDemux * demux)
+ 
+   /* set initial state */
+   gst_asf_demux_reset (demux, FALSE);
++#ifdef TCL_PATCH
++  memset(demux->platform_val, 0, 128);
++  __system_property_get("ro.product.platform_name", demux->platform_val);
++  GST_INFO ("ro.product.platform_name = %s", demux->platform_val);
++#endif
+ }
+ 
+ static gboolean
+@@ -479,6 +499,12 @@ gst_asf_demux_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
+     case GST_EVENT_FLUSH_STOP:
+       GST_OBJECT_LOCK (demux);
+       gst_asf_demux_reset_stream_state_after_discont (demux);
++#ifdef TCL_PATCH
++      if (demux->streaming == TRUE && demux->state == GST_ASF_DEMUX_STATE_INDEX)
++      {
++        demux->state = GST_ASF_DEMUX_STATE_DATA;
++      }
++#endif
+       GST_OBJECT_UNLOCK (demux);
+       gst_asf_demux_send_event_unlocked (demux, event);
+       /* upon activation, latency is no longer introduced, e.g. after seek */
+@@ -529,8 +555,15 @@ gst_asf_demux_seek_index_lookup (GstASFDemux * demux, guint * packet,
+   }
+ 
+   if (G_UNLIKELY (idx >= demux->sidx_num_entries)) {
++#ifdef TCL_PATCH
++    // 屏蔽sidx_num_entries只有1个的情况，此时任一Seek操作均引起EOS退出播放
++    // TODO: 确定1是否为特殊值或还存在其他特殊值
++    if (eos && demux->sidx_num_entries > 1)
++      *eos = TRUE;
++#else
+     if (eos)
+       *eos = TRUE;
++#endif
+     return FALSE;
+   }
+ 
+@@ -640,6 +673,9 @@ gst_asf_demux_handle_seek_push (GstASFDemux * demux, GstEvent * event)
+   GST_DEBUG_OBJECT (demux, "Pushing BYTE seek rate %g, "
+       "start %" G_GINT64_FORMAT ", stop %" G_GINT64_FORMAT, rate, cur, stop);
+   /* BYTE seek event */
++#ifdef TCL_PATCH
++  demux->segment.flags = flags;
++#endif
+   byte_event = gst_event_new_seek (rate, GST_FORMAT_BYTES, flags, cur_type,
+       cur, stop_type, stop);
+   gst_event_set_seqnum (byte_event, gst_event_get_seqnum (event));
+@@ -809,7 +845,11 @@ gst_asf_demux_handle_seek_event (GstASFDemux * demux, GstEvent * event)
+         packet = demux->num_packets;
+     }
+   } else {
++#ifdef TCL_PATCH
++    if (G_LIKELY (demux->keyunit_sync && !demux->accurate) && segment.start != 0) {
++#elif
+     if (G_LIKELY (demux->keyunit_sync && !demux->accurate)) {
++#endif
+       GST_DEBUG_OBJECT (demux, "key unit seek, adjust seek_time = %"
+           GST_TIME_FORMAT " to index_time = %" GST_TIME_FORMAT,
+           GST_TIME_ARGS (seek_time), GST_TIME_ARGS (idx_time));
+@@ -985,6 +1025,13 @@ gst_asf_demux_chain_headers (GstASFDemux * demux)
+   GST_LOG_OBJECT (demux, "header size = %u", (guint) obj.size);
+ 
+   /* + 50 for non-packet data at beginning of ASF_OBJ_DATA */
++#ifdef TCL_PATCH
++  if ((gint64)obj.size < 0)
++  {
++    goto wrong_type;
++  }
++#endif
++
+   if (gst_adapter_available (demux->adapter) < obj.size + 50)
+     goto need_more_data;
+ 
+@@ -1235,6 +1282,12 @@ gst_asf_demux_pull_headers (GstASFDemux * demux, GstFlowReturn * pflow)
+     goto wrong_type;
+ 
+   GST_LOG_OBJECT (demux, "header size = %" G_GUINT64_FORMAT, obj.size);
++#ifdef TCL_PATCH
++  if ((gint64)obj.size < 0)
++  {
++    goto no_streams;
++  }
++#endif
+ 
+   /* pull HEADER object */
+   if (!gst_asf_demux_pull_data (demux, demux->base_offset, obj.size, &buf,
+@@ -1350,7 +1403,9 @@ all_streams_prerolled (GstASFDemux * demux)
+     if (G_UNLIKELY (!GST_CLOCK_TIME_IS_VALID (last_payload->ts)
+             || last_payload->ts <= preroll_time)) {
+       GST_LOG_OBJECT (stream->pad, "not beyond preroll point yet");
++#ifndef TCL_PATCH
+       return FALSE;
++#endif
+     }
+   }
+ 
+@@ -1423,6 +1478,9 @@ gst_asf_demux_check_segment_ts (GstASFDemux * demux, GstClockTime payload_ts)
+               NULL)) {
+         GST_WARNING_OBJECT (demux, "Initial segment seek failed");
+       }
++#ifdef TCL_PATCH
++    demux->segment.flags = 0;
++#endif
+   }
+ }
+ 
+@@ -1458,7 +1516,7 @@ gst_asf_demux_get_first_ts (GstASFDemux * demux)
+ 
+       /* there are some DVR ms files where first packet has TS of 0 (instead of -1) while subsequent packets have
+          regular (singificantly larger) timestamps. If we don't deal with it, we may end up with huge gap in timestamps
+-         which makes playback stuck. The 0 timestamp may also be valid though, if the second packet timestamp continues 
++         which makes playback stuck. The 0 timestamp may also be valid though, if the second packet timestamp continues
+          from it. I haven't found a better way to distinguish between these two, except to set an arbitrary boundary
+          and disregard the first 0 timestamp if the second timestamp is bigger than the boundary) */
+ 
+@@ -2005,6 +2063,43 @@ gst_asf_demux_check_chained_asf (GstASFDemux * demux)
+   return header;
+ }
+ 
++#ifdef TCL_PATCH
++static void
++gst_asf_demux_fix_info (GstASFDemux * demux) {
++  GstBuffer *buf = NULL;
++  GstFlowReturn ret = GST_FLOW_OK;
++  gint64 file_size;
++  GstFormat format;
++  format = GST_FORMAT_BYTES;
++  gint64 last_packet_off;
++  gst_pad_peer_query_duration (demux->sinkpad, format, &file_size);
++
++  if (demux->play_time <= 0 && demux->segment.duration) {
++    last_packet_off = file_size - demux->packet_size;
++    GST_LOG_OBJECT (demux, "last packet offset :%lld", last_packet_off);
++    if (gst_asf_demux_pull_data (demux, last_packet_off, demux->packet_size, &buf, &ret)) {
++      gint64 SCR = 0;
++      gint64 duration = 0;
++      if (gst_asf_demux_parse_packet_time(demux, buf, &SCR, &duration)) {
++        demux->segment.duration = demux->play_time = SCR + duration;
++      }
++    }
++  }
++
++  if (demux->num_packets <= 0) {
++    demux->num_packets = (file_size - demux->data_offset) / demux->packet_size;
++  }
++
++  // no video,only audio
++  if (demux->seekable == FALSE && demux->packet_size > 0 && demux->num_packets > 0 && demux->play_time > 0 && demux->num_video_streams == 0) {
++    demux->seekable = TRUE;
++  }
++
++  if (buf != NULL)
++    gst_buffer_unref (buf);
++}
++#endif
++
+ static void
+ gst_asf_demux_loop (GstASFDemux * demux)
+ {
+@@ -2123,10 +2218,15 @@ gst_asf_demux_loop (GstASFDemux * demux)
+       }
+ 
+       gst_buffer_unref (sub);
+-
++#ifdef TCL_PATCH
++      if (err == GST_ASF_DEMUX_PARSE_PACKET_ERROR_NONE && n == demux->speed_packets)
++        flow = gst_asf_demux_push_complete_payloads (demux, FALSE);
++#else
+       if (err == GST_ASF_DEMUX_PARSE_PACKET_ERROR_NONE)
+         flow = gst_asf_demux_push_complete_payloads (demux, FALSE);
+ 
++#endif
++
+       ++demux->packet;
+ 
+     }
+@@ -2137,6 +2237,13 @@ gst_asf_demux_loop (GstASFDemux * demux)
+ 
+   gst_buffer_unref (buf);
+ 
++#ifdef TCL_PATCH
++  if (demux->fix_info == TRUE) {
++    gst_asf_demux_fix_info(demux);
++    demux->fix_info = FALSE;
++  }
++#endif
++
+   if (G_UNLIKELY ((demux->num_packets > 0
+               && demux->packet >= demux->num_packets)
+           || flow == GST_FLOW_EOS)) {
+@@ -2214,7 +2321,12 @@ pause:
+       GST_ELEMENT_FLOW_ERROR (demux, flow);
+       gst_asf_demux_send_event_unlocked (demux, gst_event_new_eos ());
+     }
+-
++#ifdef TCL_PATCH
++    if(flow != GST_FLOW_OK && flow != GST_FLOW_FLUSHING && flow != GST_FLOW_EOS){
++        // 避免asfdemux在demux后，A/V因为not support(主要是Video)也进入该label
++        gst_element_close_player(GST_ELEMENT(demux));
++    }
++#endif
+     return;
+   }
+ 
+@@ -2680,6 +2792,83 @@ gst_asf_demux_add_stream_headers_to_caps (GstASFDemux * demux,
+ 
+   gst_structure_take_value (structure, "streamheader", &arr_val);
+ }
++#if 0
++static GList *
++parse_vorbis_stream_headers (GstASFDemux * demux, gpointer codec_data,
++    gsize codec_data_size)
++{
++  GList *list = NULL;
++  guint8 *p = codec_data;
++  gint i, offset, num_packets;
++  guint *length, last;
++
++  GST_MEMDUMP_OBJECT (demux, "xiph codec data", codec_data, codec_data_size);
++
++  if (codec_data == NULL || codec_data_size == 0)
++    goto error;
++
++  /* start of the stream and vorbis audio or theora video, need to
++   * send the codec_priv data as first three packets */
++  num_packets = p[0] + 1;
++  GST_DEBUG_OBJECT (demux,
++      "%u stream headers, total length=%" G_GSIZE_FORMAT " bytes",
++      (guint) num_packets, codec_data_size);
++
++  /* Let's put some limits, Don't think there even is a xiph codec
++   * with more than 3-4 headers */
++  if (G_UNLIKELY (num_packets > 16)) {
++    GST_WARNING_OBJECT (demux,
++        "Unlikely number of xiph headers, most likely not valid");
++    goto error;
++  }
++
++  length = g_alloca (num_packets * sizeof (guint));
++  last = 0;
++  offset = 1;
++
++  /* first packets, read length values */
++  for (i = 0; i < num_packets - 1; i++) {
++    length[i] = 0;
++    while (offset < codec_data_size) {
++      length[i] += p[offset];
++      if (p[offset++] != 0xff)
++        break;
++    }
++    last += length[i];
++  }
++  if (offset + last > codec_data_size)
++    goto error;
++
++  /* last packet is the remaining size */
++  length[i] = codec_data_size - offset - last;
++
++  for (i = 0; i < num_packets; i++) {
++    GstBuffer *hdr;
++
++    GST_DEBUG_OBJECT (demux, "buffer %d: %u bytes", i, (guint) length[i]);
++
++    if (offset + length[i] > codec_data_size)
++      goto error;
++
++    hdr = gst_buffer_new_memdup (p + offset, length[i]);
++    list = g_list_append (list, hdr);
++
++    offset += length[i];
++  }
++
++  return list;
++
++  /* ERRORS */
++error:
++  {
++    if (list != NULL)
++      g_list_free_full (list, (GDestroyNotify) gst_buffer_unref);
++    return NULL;
++  }
++
++}
++#endif
++
+ 
+ static AsfStream *
+ gst_asf_demux_add_audio_stream (GstASFDemux * demux,
+@@ -2701,13 +2890,24 @@ gst_asf_demux_add_audio_stream (GstASFDemux * demux,
+   src_pad = gst_pad_new_from_static_template (&audio_src_template, name);
+   g_free (name);
+ 
+-  /* Swallow up any left over data and set up the 
++  /* Swallow up any left over data and set up the
+    * standard properties from the header info */
+   if (size_left) {
+     GST_INFO_OBJECT (demux, "Audio header contains %d bytes of "
+         "codec specific data", size_left);
+ 
+     g_assert (size_left <= *p_size);
++#ifdef TCL_PATCH
++  if (!strncmp(demux->platform_val, "MTK", 3)) {
++    //for mtk, in case of wma1,wma2,wma3 audio, 18 bytes need to be added before the data.
++    if ((audio->codec_tag == 0x160) || (audio->codec_tag == 0x161) || (audio->codec_tag == 0x162)) {
++      GST_INFO ("audio->codec_tag %u (0x%04x)", audio->codec_tag, audio->codec_tag);
++      *p_data -= 18;
++      *p_size += 18;
++      size_left += 18;
++    }
++  }
++#endif
+     gst_asf_demux_get_buffer (&extradata, size_left, p_data, p_size);
+   }
+ 
+@@ -2721,7 +2921,38 @@ gst_asf_demux_add_audio_stream (GstASFDemux * demux,
+     caps = gst_caps_new_simple ("audio/x-asf-unknown", "codec_id",
+         G_TYPE_INT, (gint) audio->codec_tag, NULL);
+   }
++#if 0
++  GstStructure *caps_s;
++  caps_s = gst_caps_get_structure (caps, 0);
++  if (gst_structure_has_name (caps_s, "audio/x-vorbis")) {
++    guint8 *data_ptr = NULL;
++    int data_len = 0;
++    GstMapInfo map;
++    gst_buffer_map (extradata, &map, GST_MAP_READ);
++    data_ptr  = (uint8_t *) (map.data);
++    data_len  = map.size;
++    gst_buffer_unmap (extradata, &map);
++    GList *headers =
++    parse_vorbis_stream_headers (demux, data_ptr, data_len);
++    if (headers) {
++      GList *tmp;
++      GValue arr_val = G_VALUE_INIT;
++      GValue buf_val = G_VALUE_INIT;
++      GstStructure *s;
++      g_value_init (&arr_val, GST_TYPE_ARRAY);
++      g_value_init (&buf_val, GST_TYPE_BUFFER);
++      for (tmp = headers; tmp; tmp = tmp->next) {
++        g_value_set_boxed (&buf_val, (GstBuffer *) tmp->data);
++        gst_value_array_append_value (&arr_val, &buf_val);
++      }
++      s = gst_caps_get_structure (caps, 0);
++      gst_structure_take_value (s, "streamheader", &arr_val);
++      g_value_unset (&buf_val);
++      g_list_free (headers);
+ 
++    }
++  }
++#endif
+   /* Informing about that audio format we just added */
+   if (codec_name) {
+     tags = gst_tag_list_new (GST_TAG_AUDIO_CODEC, codec_name, NULL);
+@@ -3761,6 +3992,9 @@ gst_asf_demux_process_file (GstASFDemux * demux, guint8 * data, guint64 size)
+ 
+   demux->broadcast = ! !(flags & 0x01);
+   demux->seekable = ! !(flags & 0x02);
++#ifdef TCL_PATCH
++  demux->file_size = file_size;
++#endif
+ 
+   GST_DEBUG_OBJECT (demux, "min_pktsize = %u", min_pktsize);
+   GST_DEBUG_OBJECT (demux, "flags::broadcast = %d", demux->broadcast);
+@@ -4278,6 +4512,27 @@ done:
+   if (stream) {
+     stream->ext_props = esp;
+ 
++#ifdef TCL_PATCH
++    if (stream->is_video && stream->caps && esp.avg_time_per_frame > 0) {
++      GValue framerate = { 0 };
++      GstStructure *s;
++      gint num, denom;
++
++      g_value_init (&framerate, GST_TYPE_FRACTION);
++
++      num = GST_SECOND / 100;
++      denom = esp.avg_time_per_frame;
++
++      gst_value_set_fraction (&framerate, num, denom);
++
++      stream->caps = gst_caps_make_writable (stream->caps);
++      s = gst_caps_get_structure (stream->caps, 0);
++      gst_structure_set_value (s, "framerate", &framerate);
++      g_value_unset (&framerate);
++      GST_DEBUG_OBJECT (demux, "setting framerate of %d/%d = %f",
++          num, denom, ((gdouble) num) / denom);
++    }
++#elif
+     /* try to set the framerate */
+     if (stream->is_video && stream->caps) {
+       GValue framerate = { 0 };
+@@ -4302,6 +4557,7 @@ done:
+       GST_DEBUG_OBJECT (demux, "setting framerate of %d/%d = %f",
+           num, denom, ((gdouble) num) / denom);
+     }
++#endif
+ 
+     /* add language info now if we have it */
+     if (stream->ext_props.lang_idx < demux->num_languages) {
+@@ -4710,6 +4966,11 @@ gst_asf_demux_handle_src_query (GstPad * pad, GstObject * parent,
+         GST_OBJECT_LOCK (demux);
+ 
+         if (demux->segment.duration != GST_CLOCK_TIME_NONE) {
++#ifdef TCL_PATCH
++          GstQuery *byte_query;
++          gint64 duration_bytes;
++          guint64 duration;
++#endif
+           GST_LOG ("returning duration: %" GST_TIME_FORMAT,
+               GST_TIME_ARGS (demux->segment.duration));
+ 
+@@ -4717,6 +4978,20 @@ gst_asf_demux_handle_src_query (GstPad * pad, GstObject * parent,
+               demux->segment.duration);
+ 
+           res = TRUE;
++#ifdef TCL_PATCH
++          byte_query = gst_query_new_duration (GST_FORMAT_BYTES);
++          if (gst_pad_peer_query (demux->sinkpad, byte_query))
++          {
++              gst_query_parse_duration (byte_query, &format, &duration_bytes);
++              if((duration_bytes > 0) && (demux->file_size > duration_bytes))
++              {
++                  duration = ((duration_bytes*(demux->segment.duration/1000000))/demux->file_size)*1000000;
++                  gst_query_set_duration (query, GST_FORMAT_TIME, duration);
++                  GST_LOG("[%s:%d] duration = %lld, demux->segment.duration = %lld.\n", __FUNCTION__, __LINE__, duration, demux->segment.duration);
++              }
++          }
++          gst_query_unref (byte_query);
++#endif
+         } else {
+           GST_LOG ("duration not known yet");
+         }
+@@ -4919,3 +5194,31 @@ gst_asf_demux_change_state (GstElement * element, GstStateChange transition)
+ 
+   return ret;
+ }
++
++#ifdef TCL_PATCH
++static void
++gst_asf_demux_demux_remove_pad(GstElement *element, GstPad *pad)
++{
++    GstASFDemux *demux = GST_ASF_DEMUX (element);
++    int32_t index      = 0;
++    AsfStream * stream2remove = NULL;
++    GST_OBJECT_LOCK (element);
++
++    for(;index < demux->num_streams; index++)
++    {
++        AsfStream * stream = &demux->stream[index];
++        if(stream->pad == pad)
++            stream2remove = stream;
++    }
++
++    if(NULL != stream2remove)
++    {
++        stream2remove->pad          = NULL;
++        stream2remove->discont      = TRUE;
++        stream2remove->droped_flag  = TRUE;
++    }
++    else
++        GST_ERROR_OBJECT (demux, "Can Not Remove Designated Pad Because of Can Not Finding it!!");
++    GST_OBJECT_UNLOCK (element);
++}
++#endif
+diff --git a/subprojects/gst-plugins-ugly/gst/asfdemux/gstasfdemux.h b/subprojects/gst-plugins-ugly/gst/asfdemux/gstasfdemux.h
+index 841b21ad4f..b3e000ae14 100644
+--- a/subprojects/gst-plugins-ugly/gst/asfdemux/gstasfdemux.h
++++ b/subprojects/gst-plugins-ugly/gst/asfdemux/gstasfdemux.h
+@@ -139,6 +139,9 @@ typedef struct
+   AsfStreamExtProps  ext_props;
+ 
+   gboolean     inspect_payload;
++#ifdef TCL_PATCH
++  gboolean     droped_flag;
++#endif
+ } AsfStream;
+ 
+ typedef enum {
+@@ -239,6 +242,12 @@ struct _GstASFDemux {
+   GstASF3DMode asf_3D_mode;
+ 
+   gboolean saw_file_header;
++
++#ifdef TCL_PATCH
++  guint64 file_size;//demux from file header
++  char platform_val[128];
++  gboolean fix_info;
++#endif
+ };
+ 
+ struct _GstASFDemuxClass {
+diff --git a/subprojects/gst-plugins-ugly/meson.build b/subprojects/gst-plugins-ugly/meson.build
+index ef2eed1b96..a456b3b3a1 100644
+--- a/subprojects/gst-plugins-ugly/meson.build
++++ b/subprojects/gst-plugins-ugly/meson.build
+@@ -166,11 +166,11 @@ gstcontroller_dep = dependency('gstreamer-controller-1.0', version : gst_req,
+ 
+ orc_dep = dependency('orc-0.4', version : '>= 0.4.16', required : get_option('orc'),
+     fallback : ['orc', 'orc_dep'])
+-if orc_dep.found()
+-  cdata.set('HAVE_ORC', 1) # used by a52dec for cpu detection
+-else
++#if orc_dep.found()
++#  cdata.set('HAVE_ORC', 1) # used by a52dec for cpu detection
++#else
+   cdata.set('DISABLE_ORC', 1)
+-endif
++#endif
+ 
+ gmodule_dep = dependency('gmodule-2.0', fallback : ['glib', 'libgmodule_dep'])
+ 
+-- 
+2.25.1
+

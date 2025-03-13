@@ -33,6 +33,9 @@ class Recipe(custom.GStreamer):
             'speex', 'gdk-pixbuf', 'libsoup', 'mpg123', 'lame',
             'orc', 'wavpack', 'flac', 'taglib', 'bzip2', 'zlib',
             'libvpx', 'libdv', 'cairo']
+    patches = [
+        name + '/0001-TCL-modifications-for-gst-plugins-good.patch',
+    ]
     use_system_libs = True
 
 

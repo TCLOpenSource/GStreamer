@@ -1,0 +1,2815 @@
+From d4718be5bd581be9735ff7906c10b38a3617b474 Mon Sep 17 00:00:00 2001
+From: TCLCode <opensource@tcl.com>
+Date: Thu, 6 Mar 2025 13:59:13 +0800
+Subject: [PATCH] TCL modifications for gstreamer
+
+---
+ subprojects/gstreamer/gst/gstbin.c            |   8 +
+ subprojects/gstreamer/gst/gstbuffer.c         |  26 +-
+ subprojects/gstreamer/gst/gstbuffer.h         |  48 ++
+ subprojects/gstreamer/gst/gstelement.c        | 218 +++++++
+ subprojects/gstreamer/gst/gstelement.h        |  25 +
+ subprojects/gstreamer/gst/gstevent.h          |   6 +
+ subprojects/gstreamer/gst/gstmessage.h        |  32 +
+ subprojects/gstreamer/gst/gstpad.c            |  11 +
+ subprojects/gstreamer/gst/gstpoll.c           |  37 +-
+ subprojects/gstreamer/gst/gstquery.h          |   4 +
+ subprojects/gstreamer/gst/gsttaglist.c        |  18 +-
+ subprojects/gstreamer/gst/gsttaglist.h        |  39 ++
+ subprojects/gstreamer/gst/gsturi.c            |  94 +++
+ subprojects/gstreamer/gst/gsturi.h            |  11 +-
+ .../gstreamer/libs/gst/base/gstadapter.c      |  10 +-
+ .../gstreamer/libs/gst/base/gstbaseparse.c    |  91 ++-
+ .../gstreamer/libs/gst/base/gstbaseparse.h    |  14 +-
+ .../gstreamer/libs/gst/base/gstbasesink.c     |  53 +-
+ .../gstreamer/libs/gst/base/gstbasesink.h     |   3 +
+ .../gstreamer/libs/gst/base/gstbasesrc.c      |   9 +
+ .../libs/gst/base/gsttypefindhelper.c         |  17 +
+ .../gstreamer/plugins/elements/gstfilesrc.c   | 114 +++-
+ .../gstreamer/plugins/elements/gstfilesrc.h   |   4 +
+ .../plugins/elements/gstinputselector.c       | 589 +++++++++++++++++-
+ .../plugins/elements/gstinputselector.h       |  10 +-
+ .../gstreamer/plugins/elements/gstqueue.c     |  25 +-
+ .../gstreamer/plugins/elements/gstqueue.h     |   4 +
+ .../plugins/elements/gsttypefindelement.c     |  73 ++-
+ .../plugins/elements/gsttypefindelement.h     |   7 +-
+ 29 files changed, 1563 insertions(+), 37 deletions(-)
+
+diff --git a/subprojects/gstreamer/gst/gstbin.c b/subprojects/gstreamer/gst/gstbin.c
+index a4ebffe298..afea44dab5 100644
+--- a/subprojects/gstreamer/gst/gstbin.c
++++ b/subprojects/gstreamer/gst/gstbin.c
+@@ -991,10 +991,18 @@ is_eos (GstBin * bin, guint32 * seqnum)
+         *seqnum = gst_message_get_seqnum (GST_MESSAGE_CAST (msgs->data));
+         n_eos++;
+       } else {
++#ifdef TCL_PATCH
++        if (strcmp(GST_ELEMENT_NAME (element), "tbin") == 0) {
++          n_eos++;
++        } else {
++#endif
+         GST_DEBUG ("sink '%s' did not post EOS yet",
+             GST_ELEMENT_NAME (element));
+         result = FALSE;
+         break;
++#ifdef TCL_PATCH
++        }
++#endif
+       }
+     }
+   }
+diff --git a/subprojects/gstreamer/gst/gstbuffer.c b/subprojects/gstreamer/gst/gstbuffer.c
+index 377774573c..d81fc05e6b 100644
+--- a/subprojects/gstreamer/gst/gstbuffer.c
++++ b/subprojects/gstreamer/gst/gstbuffer.c
+@@ -35,7 +35,7 @@
+  * The following example creates a buffer that can hold a given video frame
+  * with a given width, height and bits per plane.
+  *
+- * ``` C 
++ * ``` C
+  *   GstBuffer *buffer;
+  *   GstMemory *memory;
+  *   gint size, width, height, bpp;
+@@ -143,7 +143,11 @@ GType _gst_buffer_type = 0;
+  * too, and then there is again a GstMeta in GstMetaItem, so subtract one. */
+ #define ITEM_SIZE(info) ((info)->size + sizeof (GstMetaItem) - sizeof (GstMeta))
+ 
++#ifdef TCL_PATCH
++#define GST_BUFFER_MEM_MAX         64
++#else
+ #define GST_BUFFER_MEM_MAX         16
++#endif
+ 
+ #define GST_BUFFER_SLICE_SIZE(b)   (((GstBufferImpl *)(b))->slice_size)
+ #define GST_BUFFER_MEM_LEN(b)      (((GstBufferImpl *)(b))->len)
+@@ -522,6 +526,18 @@ gst_buffer_get_max_memory (void)
+   return GST_BUFFER_MEM_MAX;
+ }
+ 
++#ifdef TCL_PATCH
++void
++gst_buffer_copy_reserved(GstBuffer* dest, GstBuffer* src)
++{
++  GST_BUFFER_TYPE(dest)           = GST_BUFFER_TYPE(src);
++  GST_BUFFER_RESERVERD1(dest)     = GST_BUFFER_RESERVERD1(src);
++  GST_BUFFER_RESERVERD2(dest)     = GST_BUFFER_RESERVERD2(src);
++  GST_BUFFER_RESERVERD3(dest)     = GST_BUFFER_RESERVERD3(src);
++  GST_BUFFER_RESERVERD4(dest)     = GST_BUFFER_RESERVERD4(src);
++  GST_BUFFER_RESERVERD_USED(dest) = GST_BUFFER_RESERVERD_USED(src);
++}
++#endif
+ /**
+  * gst_buffer_copy_into:
+  * @dest: a destination #GstBuffer
+@@ -579,6 +595,10 @@ gst_buffer_copy_into (GstBuffer * dest, GstBuffer * src,
+         (GST_MINI_OBJECT_FLAGS (dest) & ~flags_mask);
+   }
+ 
++#ifdef TCL_PATCH
++  gst_buffer_copy_reserved(dest, src);
++#endif
++
+   if (flags & GST_BUFFER_COPY_TIMESTAMPS) {
+     if (offset == 0) {
+       GST_BUFFER_PTS (dest) = GST_BUFFER_PTS (src);
+@@ -844,6 +864,10 @@ gst_buffer_init (GstBufferImpl * buffer, gsize size)
+   GST_BUFFER_OFFSET (buffer) = GST_BUFFER_OFFSET_NONE;
+   GST_BUFFER_OFFSET_END (buffer) = GST_BUFFER_OFFSET_NONE;
+ 
++#ifdef TCL_PATCH
++  GST_BUFFER_TYPE(buffer) = GST_BUFFER_TYPE_UNKNOW;
++  GST_BUFFER_RESERVERD_USED(buffer) = GST_BUFFER_RESERVER_NOT_USED;
++#endif
+   GST_BUFFER_MEM_LEN (buffer) = 0;
+   GST_BUFFER_META (buffer) = NULL;
+ }
+diff --git a/subprojects/gstreamer/gst/gstbuffer.h b/subprojects/gstreamer/gst/gstbuffer.h
+index ee352d9f5e..efa85c29a3 100644
+--- a/subprojects/gstreamer/gst/gstbuffer.h
++++ b/subprojects/gstreamer/gst/gstbuffer.h
+@@ -132,6 +132,15 @@ typedef struct _GstBufferPool GstBufferPool;
+  */
+ #define GST_BUFFER_OFFSET_END(buf)              (GST_BUFFER_CAST(buf)->offset_end)
+ 
++#ifdef TCL_PATCH
++#define GST_BUFFER_TYPE(buf)                    (GST_BUFFER_CAST(buf)->type)
++#define GST_BUFFER_RESERVERD1(buf)              (GST_BUFFER_CAST(buf)->reserved1)
++#define GST_BUFFER_RESERVERD2(buf)              (GST_BUFFER_CAST(buf)->reserved2)
++#define GST_BUFFER_RESERVERD3(buf)              (GST_BUFFER_CAST(buf)->reserved3)
++#define GST_BUFFER_RESERVERD4(buf)              (GST_BUFFER_CAST(buf)->reserved4)
++#define GST_BUFFER_RESERVERD_USED(buf)          (GST_BUFFER_CAST(buf)->reserved_used)
++#endif
++
+ /**
+  * GST_BUFFER_OFFSET_NONE:
+  *
+@@ -252,9 +261,34 @@ typedef enum {
+    */
+   GST_BUFFER_FLAG_NON_DROPPABLE = (GST_MINI_OBJECT_FLAG_LAST << 12),
+ 
++#ifdef TCL_PATCH
++  GST_BUFFER_FLAG_HLS           = (GST_MINI_OBJECT_FLAG_LAST << 13),
++  GST_BUFFER_FLAG_HLS_LIVE      = (GST_MINI_OBJECT_FLAG_LAST << 14),
++#endif
+   GST_BUFFER_FLAG_LAST          = (GST_MINI_OBJECT_FLAG_LAST << 16)
+ } GstBufferFlags;
+ 
++#ifdef TCL_PATCH
++typedef enum {
++    GST_BUFFER_TYPE_UNKNOW       = 0,
++    GST_BUFFER_TYPE_VIDEO        = 1,
++    GST_BUFFER_TYPE_AUDIO        = 2,
++    GST_BUFFER_TYPE_SUBTITLE     = 3,
++    GST_BUFFER_TYPE_USERDATA     = 4,
++    GST_BUFFER_TYPE_OTHER        = 5,
++
++    Gst_BUFFER_TYPE_LAST         = 99
++}GstBufferType;
++
++typedef enum {
++    GST_BUFFER_RESERVER_NOT_USED = 0,
++    GST_BUFFER_RESERVER1_USED    = (1 << 1),
++    GST_BUFFER_RESERVER2_USED    = (1 << 2),
++    GST_BUFFER_RESERVER3_USED    = (1 << 3),
++    GST_BUFFER_RESERVER4_USED    = (1 << 4),
++}GstBufferReserverUsed;
++#endif
++
+ /**
+  * GstBuffer:
+  * @mini_object: the parent structure
+@@ -292,6 +326,16 @@ struct _GstBuffer {
+   /* media specific offset */
+   guint64                offset;
+   guint64                offset_end;
++
++#ifdef TCL_PATCH
++  /* <userdata> */
++  GstBufferType          type;          /* 用于分辨Buffer的类别 */
++  guint64                reserved1;     /* 预留位1 */
++  guint64                reserved2;     /* 预留位2 */
++  guint64                reserved3;     /* 预留位3 */
++  void*                  reserved4;     /* 预留位4 */
++  int                    reserved_used; /* 预留位使用情况 */
++#endif
+ };
+ 
+ GST_API
+@@ -429,6 +473,10 @@ gboolean       gst_buffer_set_flags        (GstBuffer * buffer, GstBufferFlags f
+ GST_API
+ gboolean       gst_buffer_unset_flags      (GstBuffer * buffer, GstBufferFlags flags);
+ 
++#ifdef TCL_PATCH
++GST_API
++void        gst_buffer_copy_reserved(GstBuffer* dest, GstBuffer* src);
++#endif
+ 
+ #ifndef GST_DISABLE_MINIOBJECT_INLINE_FUNCTIONS
+ /* refcounting */
+diff --git a/subprojects/gstreamer/gst/gstelement.c b/subprojects/gstreamer/gst/gstelement.c
+index 97121ef29e..5d993e57f7 100644
+--- a/subprojects/gstreamer/gst/gstelement.c
++++ b/subprojects/gstreamer/gst/gstelement.c
+@@ -3905,3 +3905,221 @@ gst_make_element_message_details (const char *name, ...)
+ 
+   return structure;
+ }
++
++#ifdef TCL_PATCH
++void
++gst_element_close_player(GstElement * element)
++{
++  if(element == NULL)
++    return;
++
++  // 创建一个特定类型和内容的消息
++  GError *err = g_error_new (GST_RESOURCE_ERROR, GST_RESOURCE_ERROR_READ, "This Resource Can Not Play By Gstreamer!");
++  GstMessage *msg = gst_message_new_error (GST_OBJECT_CAST (element), err, "ERROR_SOURCE");
++
++  // 抛送消息，用于让Bus处理
++  gst_element_post_message (GST_ELEMENT_CAST (element), msg);
++  g_error_free (err);
++}
++
++#define FORMATS "{ F32LE, F32BE, F64LE, F64BE, "\
++                  "S32LE, S32BE, U32LE, U32BE, "\
++                  "S24LE, S24BE, U24LE, U24BE, "\
++                  "S16LE, S16BE, U16LE, U16BE, "\
++                  "S8, U8 } "
++
++
++static gboolean
++gst_element_check_pad_is_pending(GstPad* pad)
++{
++  gboolean ret  = FALSE;
++
++  if (FALSE == gst_pad_is_linked(pad))
++      return TRUE;
++
++  // 特别处理Caps为NULL的情况
++  GstCaps* caps = gst_pad_get_current_caps(pad);
++  if (NULL == caps)
++    return TRUE;
++  else {
++    gboolean canIntersect = FALSE;
++    // UniASink/UniVSink所接受的Caps
++    GstCaps* acceptCaps = gst_caps_from_string(
++                // Audio
++                "audio/x-raw, "
++                "format = (string)" FORMATS " , "
++                "layout = (string) interleaved, "
++                "rate = (int) [ 1, MAX ], "
++                "channels = (int) [ 1, MAX ]; "
++                "audio/mpeg, layer =(int) {1,2,3}, parsed=(boolean)true;"
++                "audio/mpeg, mpegversion =(int) {1,2,4}, framed=(boolean)true, stream-format = (string) { raw, adts, adif };"
++                "audio/AMR-WB; "
++                "audio/AMR; "
++                "audio/x-wma, wmaversion = (int) {1,2,3}; "
++                "audio/x-ac3, framed=(boolean)true;"
++                "audio/x-eac3; "
++                "audio/aac; "
++                "audio/x-private-ts-lpcm; "
++                "audio/x-vorbis; "
++                // Video
++                "video/x-svq; "
++                "video/x-dv; "
++                "video/x-cinepak; "
++                "video/x-h264; "
++                "video/x-h264-tcl, parsed = (boolean) true; "
++                "video/x-h263; "
++                "video/mpeg, systemstream=(boolean)false, mpegversion = (int){ 1, 2, 4 }, parsed=(boolean)true; "
++                "video/x-divx; "
++                "video/x-xvid; "
++                "video/x-gst-fourcc-avs2; "
++                "video/x-pn-realvideo; "
++                "video/x-wmv; "
++                "video/x-flash-video; "
++                "video/x-vp8; "
++                "video/x-vp9; "
++                "video/x-flash-video; "
++                "video/x-msmpeg; "
++                "video/x-h265; "
++                "video/x-h265-tcl, parsed = (boolean) true; "
++                "video/x-vp6-flash; "
++                "video/x-cavs; "
++                 "image/jpeg" );
++    if (gst_caps_can_intersect(caps, acceptCaps))
++        canIntersect = TRUE;
++
++    gst_caps_unref(caps);
++    gst_caps_unref(acceptCaps);
++
++    // 如果能与FppASink/FppVSink所接受的Caps相交，则应当是可以被支持的格式，是不可能进入等待状态的
++    if (TRUE == canIntersect)
++      return FALSE;
++  }
++
++  /** 通过查询获取流的状态
++   * 1.返回TRUE:  表明该pad所在的流最终连接到了基于BaseSink的Sink插件，
++   *              且该插件已经进入了Paused状态，则绝对不会是该路流阻塞了管道
++   * 2.返回FALSE: 1) 该路流并没有被InputSelector选中，因此需要被FppVSink和FppASink的接受Caps(已知支持格式)排除；
++   *              2) 该路流被InputSelector选中，末端未连接Sink插件，该路必须被移除；
++   *              3) 该路流被InputSelector选中，末端连接了Sink插件，但状态为Ready状态，改路必须被移除
++   */
++
++  // 构建一个query
++  GstQuery*   query  = gst_query_new_custom (GST_QUERY_PAD_PENDING, NULL);
++  GstPad*     peer   = gst_pad_get_peer(pad);
++
++  if (FALSE == gst_pad_query(peer, query))
++    ret = TRUE;
++
++  gst_query_unref(query);
++  gst_object_unref(peer);
++  return ret;
++}
++
++gboolean
++gst_element_remove_pending_pad(GstElement* element)
++{
++  g_return_val_if_fail (GST_IS_ELEMENT (element), FALSE);
++
++  // 判断Demux自身是否进入了PAUSED状态
++  GstState  cur_state     = GST_STATE_VOID_PENDING;
++  GstState  pending_state = GST_STATE_PAUSED;
++  gst_element_get_state(element, &cur_state, &pending_state, GST_SECOND / 2);
++  if (cur_state < GST_STATE_PAUSED)
++    return FALSE;
++
++  // 记录已经被处理了的Pad,避免重复处理
++  GList* padChecked = NULL;
++
++  gboolean    ret   = FALSE;
++  GValue      data  = { 0, };
++  gboolean    done  = FALSE;
++  GstIterator *it   = gst_element_iterate_src_pads(element);
++  while (!done) {
++    switch (gst_iterator_next (it, &data)) {
++      case GST_ITERATOR_OK:
++      {
++        GstPad  *pad      = g_value_get_object (&data);
++        GList   *iter     = NULL;
++        gboolean hasCheck = FALSE;
++        // 去重校验
++        for (iter = g_list_first(padChecked); iter; iter = g_list_next(iter)) {
++            GstPad*  padCheck = (GstPad *)(iter->data);
++            if(padCheck == pad) {
++                hasCheck = TRUE;
++                break;
++            }
++        }
++
++        // 只处理没有检查过的Pad
++        if(FALSE == hasCheck) {
++          // 判断该Pad所在路是否处于Ready状态
++          if(TRUE == gst_element_check_pad_is_pending(pad)) {
++            GstElementClass *oclass = GST_ELEMENT_GET_CLASS (element);
++            if(oclass->demux_remove_pad) {
++              GST_DEBUG_OBJECT (element, "Drop Pad for %s", GST_ELEMENT_NAME(element));
++              if (gst_pad_is_active (pad)) {
++                GstSegment segment;
++                segment.format   = GST_FORMAT_TIME;
++                segment.start    = 0;
++                segment.stop     = GST_CLOCK_TIME_NONE;
++                segment.position = segment.start;
++                gst_pad_push_event (pad, gst_event_new_segment(&segment));
++                gst_pad_push_event (pad, gst_event_new_eos());
++                gst_pad_set_active (pad, FALSE);
++                ret  = TRUE;
++
++              }
++              // 删除插件保存的记录，避免插件运行的时候报错
++              oclass->demux_remove_pad(element, pad);
++            } else {
++              // 此插件没有重写的函数demux_remove_pad，则极大程度上不能修复管道，退出即可
++              g_print(element, "Can Not Drop Pad for %s, Because of %s has no function of pad_removed",
++                          GST_ELEMENT_NAME(element),
++                          GST_ELEMENT_NAME(element));
++            }
++            done = TRUE;
++          } else
++            // 没有检查过.且不是要被Drop的Pad则保存记录
++            padChecked = g_list_append(padChecked, pad);
++        }
++        g_value_reset (&data);
++      } break;
++      case GST_ITERATOR_RESYNC:
++        gst_iterator_resync (it);
++        break;
++      default:
++      case GST_ITERATOR_DONE:
++        done = TRUE;
++        break;
++    }
++  }
++  g_value_unset (&data);
++  gst_iterator_free (it);
++
++  // 由于该List存储的是Pad的指针，而不是Malloc出来的数据,因此不需要对每个节点进行Free
++  if (padChecked)
++    g_list_free(padChecked);
++
++  return ret;
++}
++
++void
++gst_element_send_vid_running_time(GstPad* sinkpad, GstClockTime vid_running_time, guint* count, guint trigger)
++{
++  /* 每次加一 */
++  *count = *count + 1;
++  /* 触发条件 */
++  if(*count % trigger == 0) {
++    *count = 0;
++    if(sinkpad) {
++      GstStructure* st = gst_structure_new_empty("custom_event_pts");
++      GValue pts_value = { 0, };
++      g_value_init (&pts_value, G_TYPE_UINT64);
++      g_value_set_uint64(&pts_value, (int64_t)vid_running_time);
++      gst_structure_set_value(st, "PTS", &pts_value);
++      GstEvent* event  = gst_event_new_custom(GST_EVENT_CUSTOM_UPSTREAM, st);
++      gst_pad_push_event(sinkpad, event);
++    }
++  }
++}
++#endif
+diff --git a/subprojects/gstreamer/gst/gstelement.h b/subprojects/gstreamer/gst/gstelement.h
+index e690bf0e3f..ea44e4ce3a 100644
+--- a/subprojects/gstreamer/gst/gstelement.h
++++ b/subprojects/gstreamer/gst/gstelement.h
+@@ -875,6 +875,9 @@ struct _GstElementClass
+ 
+   void                  (*set_context)          (GstElement *element, GstContext *context);
+ 
++#ifdef TCL_PATCH
++  void                  (*demux_remove_pad)     (GstElement *element, GstPad *pad);
++#endif
+   /*< private >*/
+   gpointer _gst_reserved[GST_PADDING_LARGE-2];
+ };
+@@ -1202,6 +1205,28 @@ GList*                  gst_element_get_pad_template_list      (GstElement *elem
+ GST_API
+ const gchar *           gst_element_get_metadata               (GstElement * element, const gchar * key);
+ 
++#ifdef TCL_PATCH
++
++GST_API
++void                   gst_element_close_player(GstElement * element);
++
++GST_API
++gboolean gst_element_remove_pending_pad(GstElement* element);
++
++GST_API
++void     gst_element_send_vid_running_time(GstPad* sinkpad, GstClockTime vid_running_time, guint* count, guint trigger);
++
++
++
++#define gst_element_send_fake_data(srcpad, flag, sleep_time, end_flag, have_frame) if (FALSE == flag){ \
++        gst_pad_push(srcpad, gst_buffer_new_and_alloc(4)); \
++        end_flag = TRUE;\
++        have_frame = FALSE; \
++        usleep(sleep_time); \
++        continue;\
++    }
++#endif
++
+ G_DEFINE_AUTOPTR_CLEANUP_FUNC(GstElement, gst_object_unref)
+ 
+ G_END_DECLS
+diff --git a/subprojects/gstreamer/gst/gstevent.h b/subprojects/gstreamer/gst/gstevent.h
+index e036a34ad4..43eeeccea7 100644
+--- a/subprojects/gstreamer/gst/gstevent.h
++++ b/subprojects/gstreamer/gst/gstevent.h
+@@ -188,7 +188,13 @@ typedef enum {
+   GST_EVENT_CUSTOM_DOWNSTREAM_OOB    = GST_EVENT_MAKE_TYPE (290, _FLAG(DOWNSTREAM)),
+   GST_EVENT_CUSTOM_DOWNSTREAM_STICKY = GST_EVENT_MAKE_TYPE (300, _FLAG(DOWNSTREAM) | _FLAG(SERIALIZED) | _FLAG(STICKY) | _FLAG(STICKY_MULTI)),
+   GST_EVENT_CUSTOM_BOTH              = GST_EVENT_MAKE_TYPE (310, _FLAG(BOTH) | _FLAG(SERIALIZED)),
++
++#ifdef TCL_PATCH
++  GST_EVENT_CUSTOM_BOTH_OOB          = GST_EVENT_MAKE_TYPE (320, _FLAG(BOTH)),
++  GST_EVENT_CUSTOM_SKIP_VIDEO        = GST_EVENT_MAKE_TYPE (330, _FLAG(BOTH))
++#else
+   GST_EVENT_CUSTOM_BOTH_OOB          = GST_EVENT_MAKE_TYPE (320, _FLAG(BOTH))
++#endif
+ } GstEventType;
+ #undef _FLAG
+ 
+diff --git a/subprojects/gstreamer/gst/gstmessage.h b/subprojects/gstreamer/gst/gstmessage.h
+index ea3f49fea6..aba93803dd 100644
+--- a/subprojects/gstreamer/gst/gstmessage.h
++++ b/subprojects/gstreamer/gst/gstmessage.h
+@@ -180,6 +180,38 @@ typedef enum
+   GST_MESSAGE_REDIRECT          = GST_MESSAGE_EXTENDED + 6,
+   GST_MESSAGE_DEVICE_CHANGED    = GST_MESSAGE_EXTENDED + 7,
+   GST_MESSAGE_INSTANT_RATE_REQUEST = GST_MESSAGE_EXTENDED + 8,
++
++#ifdef TCL_PATCH
++  GST_MESSAGE_DECODE_VIDEO_DATA_ERRO        = GST_MESSAGE_EXTENDED + 0x100,  /**<视频解码不正常*/
++  GST_MESSAGE_DECODE_VIDEO_NORMAL           = GST_MESSAGE_EXTENDED + 0x101,  /**<视频解码正常*/
++  GST_MESSAGE_DECODE_AUDIO_DATA_ERRO        = GST_MESSAGE_EXTENDED + 0x102,  /**<音频解码不正常*/
++  GST_MESSAGE_DECODE_AUDIO_NORMAL           = GST_MESSAGE_EXTENDED + 0x103,  /**<音频解码正常*/
++  GST_MESSAGE_DECODE_VIDEO_UNSUPPORT        = GST_MESSAGE_EXTENDED + 0x104,  /**<不支持的视频格式*/
++  GST_MESSAGE_DECODE_AUDIO_UNSUPPORT        = GST_MESSAGE_EXTENDED + 0x105,  /**<不支持的音频格式*/
++  GST_MESSAGE_DECODE_VIDEO_EOS              = GST_MESSAGE_EXTENDED + 0x106,  /**<解码器播放到文件结尾*/
++  GST_MESSAGE_DECODE_AUDIO_EOS              = GST_MESSAGE_EXTENDED + 0x107,  /**<解码器播放到文件结尾*/
++  GST_MESSAGE_DECODE_AV_SYNC_DONE           = GST_MESSAGE_EXTENDED + 0x108,  /**<音视频同步完成*/
++  GST_MESSAGE_DECODE_AFD_CHANGE             = GST_MESSAGE_EXTENDED + 0x109,  /**<Auto Format 发生变化*/
++  GST_MESSAGE_DECODE_FRIST_IFRAME           = GST_MESSAGE_EXTENDED + 0x10a,  /**<显示第一个 I 帧*/
++  GST_MESSAGE_DECODE_BUFFERING              = GST_MESSAGE_EXTENDED + 0x10b,  /**<decoder缓冲区数据低于起播时间，需要上层push数据 */
++  GST_MESSAGE_DECODE_BUFFER_OK              = GST_MESSAGE_EXTENDED + 0x10c,  /**<decoder缓冲区数据量高于起播时间 */
++  GST_MESSAGE_DECODE_CAPACITY_INSUFFICIENT  = GST_MESSAGE_EXTENDED + 0x10d,  /**<decoder处理能力不足以播放当前的视频数据 ，该事件需要底层驱动带参数*/
++  GST_MESSAGE_DECODE_VIDEO_ASPECT_CHANGE    = GST_MESSAGE_EXTENDED + 0x10e,  /**<decoder 发现视频比例模式发生变化时，将该事件通知到上层   */
++
++
++
++  GST_MEDIA_MSG_PLAY_EOS                        = GST_MESSAGE_EXTENDED + 0x200,
++  GST_MESSAGE_MSG_STOP_PLAYING                  = GST_MESSAGE_EXTENDED + 0x201,
++  GST_MESSAGE_MSG_ZOOM_SMALL_WINDOW             = GST_MESSAGE_EXTENDED + 0x202,
++  GST_MESSAGE_MSG_ZOOM_FULL_WINDOW              = GST_MESSAGE_EXTENDED + 0x203,
++  GST_MESSAGE_MSG_MHEG_XKEY_FILE_ERROR          = GST_MESSAGE_EXTENDED + 0x204,
++  GST_MESSAGE_MSG_DOWNLOAD_EOS                  = GST_MESSAGE_EXTENDED + 0x205,
++  GST_MESSAGE_MSG_DOWNLOAD_BEGIN                = GST_MESSAGE_EXTENDED + 0x206,
++  GST_MESSAGE_MSG_STREAM_EOS                    = GST_MESSAGE_EXTENDED + 0x207,
++  GST_MESSAGE_MSG_WINDOW_CONNECT_OUT            = GST_MESSAGE_EXTENDED + 0x208,  /**<  当前播放器的window被其他播放所抢占*/
++  GST_MESSAGE_MSG_SURFACE_SHOW                  = GST_MESSAGE_EXTENDED + 0x209,
++  GST_MESSAGE_MSG_WINDOW_SIZE_CHANGE            = GST_MESSAGE_EXTENDED + 0x210,
++#endif
+   GST_MESSAGE_ANY               = (gint) (0xffffffff)
+ } GstMessageType;
+ 
+diff --git a/subprojects/gstreamer/gst/gstpad.c b/subprojects/gstreamer/gst/gstpad.c
+index 06b4552f6f..2d275436b2 100644
+--- a/subprojects/gstreamer/gst/gstpad.c
++++ b/subprojects/gstreamer/gst/gstpad.c
+@@ -442,10 +442,21 @@ remove_events (GstPad * pad)
+ 
+     ev->event = NULL;
+ 
++#ifdef TCL_PATCH
++    if (event && GST_EVENT_TYPE (event) == GST_EVENT_CAPS){
++      notify = TRUE;
++      if(GST_OBJECT_REFCOUNT(event) == 0)
++        event = NULL;
++    }
++
++    if(event)
++      gst_event_unref (event);
++#else
+     if (event && GST_EVENT_TYPE (event) == GST_EVENT_CAPS)
+       notify = TRUE;
+ 
+     gst_event_unref (event);
++#endif
+   }
+ 
+   GST_OBJECT_FLAG_UNSET (pad, GST_PAD_FLAG_PENDING_EVENTS);
+diff --git a/subprojects/gstreamer/gst/gstpoll.c b/subprojects/gstreamer/gst/gstpoll.c
+index f5f10bc5e1..c6f58d707f 100644
+--- a/subprojects/gstreamer/gst/gstpoll.c
++++ b/subprojects/gstreamer/gst/gstpoll.c
+@@ -179,8 +179,16 @@ wake_event (GstPoll * set)
+ {
+   ssize_t num_written;
+   while ((num_written = write (set->control_write_fd.fd, "W", 1)) != 1) {
++
++#ifdef TCL_PATCH
++    GST_WARNING("%p:num_written = %d, write_fd = %d, errno = %s",set, num_written ,set->control_write_fd.fd, strerror (errno));
++    if (num_written == -1 && errno != EAGAIN && errno != EINTR) {
++      GST_WARNING("%p: failed to wake event: %s", set, strerror (errno));
++
++#else
+     if (num_written == -1 && errno != EAGAIN && errno != EINTR) {
+       g_critical ("%p: failed to wake event: %s", set, strerror (errno));
++#endif
+       return FALSE;
+     }
+   }
+@@ -193,8 +201,14 @@ release_event (GstPoll * set)
+   gchar buf[1] = { '\0' };
+   ssize_t num_read;
+   while ((num_read = read (set->control_read_fd.fd, buf, 1)) != 1) {
++#ifdef TCL_PATCH
++    GST_WARNING("%p:num_read = %d, read_fd = %d,errno = %s",set, num_read ,set->control_read_fd.fd, strerror (errno));
++    if ((num_read == -1 && errno != EAGAIN && errno != EINTR) || (num_read == 0 && errno == ENOENT)) {
++      GST_WARNING("%p: failed to release event: %s", set, strerror (errno));
++#else
+     if (num_read == -1 && errno != EAGAIN && errno != EINTR) {
+-      g_critical ("%p: failed to release event: %s", set, strerror (errno));
++      g_critical ("%p: failed to release event: %s", set, strerror (errno))
++#endif
+       return FALSE;
+     }
+   }
+@@ -291,9 +305,13 @@ raise_wakeup (GstPoll * set)
+     result = wake_event (set);
+   }
+ 
++#ifdef TCL_PATCH
++  set->control_pending++;
++#else
+   if (result) {
+     set->control_pending++;
+   }
++#endif
+ 
+   g_mutex_unlock (&set->lock);
+ 
+@@ -321,7 +339,10 @@ release_wakeup (GstPoll * set)
+       set->control_pending--;
+     }
+   } else {
++
++#ifndef TCL_PATCH
+     errno = EWOULDBLOCK;
++#endif
+   }
+ 
+   g_mutex_unlock (&set->lock);
+@@ -692,8 +713,20 @@ gst_poll_new (gboolean controllable)
+     if (socketpair (PF_UNIX, SOCK_STREAM, 0, control_sock) < 0)
+       goto no_socket_pair;
+ 
++#ifdef TCL_PATCH
++    if (control_sock[0] <= 0 || control_sock[1] <= 0) {
++      gint tmp_read_fd = control_sock[0];
++      gint tmp_write_fd = control_sock[1];
++
++      if (socketpair (PF_UNIX, SOCK_STREAM, 0, control_sock) < 0)
++        goto no_socket_pair;
++
++    }
++#endif
++
+     nset->control_read_fd.fd = control_sock[0];
+     nset->control_write_fd.fd = control_sock[1];
++    GST_INFO("%p: new controllable : %d,read_fd = %d, write_fd = %d", nset, controllable, nset->control_read_fd.fd, nset->control_write_fd.fd);
+ 
+     gst_poll_add_fd_unlocked (nset, &nset->control_read_fd);
+     gst_poll_fd_ctl_read_unlocked (nset, &nset->control_read_fd, TRUE);
+@@ -769,7 +802,7 @@ gst_poll_free (GstPoll * set)
+ {
+   g_return_if_fail (set != NULL);
+ 
+-  GST_DEBUG ("%p: freeing", set);
++  GST_INFO ("%p: freeing", set);
+ 
+ #ifndef G_OS_WIN32
+   if (set->control_write_fd.fd >= 0)
+diff --git a/subprojects/gstreamer/gst/gstquery.h b/subprojects/gstreamer/gst/gstquery.h
+index 949e30aeed..7321a7cb2b 100644
+--- a/subprojects/gstreamer/gst/gstquery.h
++++ b/subprojects/gstreamer/gst/gstquery.h
+@@ -126,6 +126,10 @@ typedef enum {
+   GST_QUERY_DRAIN        = GST_QUERY_MAKE_TYPE (180, _FLAG(DOWNSTREAM) | _FLAG(SERIALIZED)),
+   GST_QUERY_CONTEXT      = GST_QUERY_MAKE_TYPE (190, _FLAG(BOTH)),
+   GST_QUERY_BITRATE      = GST_QUERY_MAKE_TYPE (200, _FLAG(DOWNSTREAM)),
++
++#ifdef TCL_PATCH
++  GST_QUERY_PAD_PENDING  = GST_QUERY_MAKE_TYPE (210, _FLAG(DOWNSTREAM)),
++#endif
+ } GstQueryType;
+ #undef _FLAG
+ 
+diff --git a/subprojects/gstreamer/gst/gsttaglist.c b/subprojects/gstreamer/gst/gsttaglist.c
+index fedfc37309..0038e4d55d 100644
+--- a/subprojects/gstreamer/gst/gsttaglist.c
++++ b/subprojects/gstreamer/gst/gsttaglist.c
+@@ -395,6 +395,11 @@ _priv_gst_tag_initialize (void)
+   gst_tag_register_static (GST_TAG_IMAGE_ORIENTATION, GST_TAG_FLAG_META,
+       G_TYPE_STRING, _("image orientation"),
+       _("How the image should be rotated or flipped before display"), NULL);
++#ifdef TCL_PATCH
++  gst_tag_register_static (GST_TAG_IMAGE_ORIENTATION_FLIP, GST_TAG_FLAG_META,
++      G_TYPE_STRING, _("image orientation and flip"),
++     _("How the image should be rotated and flipped before display"), NULL);
++#endif
+   gst_tag_register_static (GST_TAG_PUBLISHER, GST_TAG_FLAG_META,
+       G_TYPE_STRING,
+       _("publisher"),
+@@ -410,7 +415,18 @@ _priv_gst_tag_initialize (void)
+   gst_tag_register_static (GST_TAG_PRIVATE_DATA, GST_TAG_FLAG_META,
+       GST_TYPE_SAMPLE,
+       _("private-data"), _("Private data"), gst_tag_merge_use_first);
+-
++#ifdef TCL_PATCH
++  gst_tag_register_static (GST_TAG_AUDIO_CHANNELS, GST_TAG_FLAG_META,
++      G_TYPE_UINT,
++      _("audio channel count"),
++      _("count of channel this track belongs to"),
++      gst_tag_merge_use_first);
++  gst_tag_register_static (GST_TAG_TRACK_ID, GST_TAG_FLAG_META,
++      G_TYPE_UINT,
++     _("track id"),
++     _("audio or video track id, use for pid"),
++     NULL);
++#endif
+ }
+ 
+ /**
+diff --git a/subprojects/gstreamer/gst/gsttaglist.h b/subprojects/gstreamer/gst/gsttaglist.h
+index c15ea2d34f..e5da162c6f 100644
+--- a/subprojects/gstreamer/gst/gsttaglist.h
++++ b/subprojects/gstreamer/gst/gsttaglist.h
+@@ -615,6 +615,7 @@ gboolean  gst_tag_list_take    (GstTagList ** old_taglist,
+  * count of tracks inside collection this track belongs to (unsigned integer)
+  */
+ #define GST_TAG_TRACK_COUNT            "track-count"
++
+ /**
+  * GST_TAG_ALBUM_VOLUME_NUMBER:
+  *
+@@ -1114,7 +1115,45 @@ gboolean  gst_tag_list_take    (GstTagList ** old_taglist,
+  * Since: 1.8
+  */
+ #define GST_TAG_PRIVATE_DATA                         "private-data"
++#ifdef TCL_PATCH
++/**
++ * GST_TAG_IMAGE_ORIENTATION_FLIP:
++ *
++ * image rotate and flip at the same time
++ *
++ */
++#define GST_TAG_IMAGE_ORIENTATION_FLIP        "image-orientation-flip"
++#endif
++#ifdef TCL_PATCH
++/**
++ * GST_TAG_AUDIO_CHANNELS:
++ *
++ * count of channels this track belongs to (unsigned integer)
++ */
++
++#define GST_TAG_AUDIO_CHANNELS         "audio-channels"
++
++/**
++ * GST_TAG_TRACK_ID:
++ *
++ * track id (guint)
++ */
++#define GST_TAG_TRACK_ID                 "track-id"
+ 
++/**
++ * GST_TAG_ADAPT_SET_ID:
++ *
++ * Adaptsetation id (guint)
++ */
++#define GST_TAG_ADAPT_SET_ID              "adapt-set-id"
++
++/**
++ * GST_TAG_AUDIO_DESCRIPTION:
++ *
++ * Adaptsetation id (guint)
++ */
++#define GST_TAG_AUDIO_DESCRIPTION          "audio-description"
++#endif
+ G_DEFINE_AUTOPTR_CLEANUP_FUNC(GstTagList, gst_tag_list_unref)
+ 
+ G_END_DECLS
+diff --git a/subprojects/gstreamer/gst/gsturi.c b/subprojects/gstreamer/gst/gsturi.c
+index 70a8fff1c3..fe62753377 100644
+--- a/subprojects/gstreamer/gst/gsturi.c
++++ b/subprojects/gstreamer/gst/gsturi.c
+@@ -613,6 +613,100 @@ gst_uri_protocol_is_supported (const GstURIType type, const gchar * protocol)
+     return FALSE;
+ }
+ 
++#ifdef TCL_PATCH
++GstElement *
++gst_element_make_from_uri_ext (const GstURIType type, const gchar * uri,
++    const gchar * elementname, GError ** error,
++    gboolean use_http_pull, gboolean use_smb_push, gboolean use_iso_src)
++{
++  GList *possibilities, *walk;
++  gchar *protocol;
++  GstElement *ret = NULL;
++
++  g_return_val_if_fail (gst_is_initialized (), NULL);
++  g_return_val_if_fail (GST_URI_TYPE_IS_VALID (type), NULL);
++  g_return_val_if_fail (error == NULL || *error == NULL, NULL);
++
++  if (!gst_uri_is_valid (uri)) {
++    g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_BAD_URI,
++        _("Invalid URI: %s"), uri);
++    return NULL;
++  }
++
++  GST_DEBUG ("type:%d, uri:%s, elementname:%s", type, uri, elementname);
++
++  protocol = gst_uri_get_protocol (uri);
++  possibilities = get_element_factories_from_uri_protocol (type, protocol);
++
++  if (!possibilities) {
++    GST_DEBUG ("No %s for URI '%s'", type == GST_URI_SINK ? "sink" : "source",
++        uri);
++    /* The error message isn't great, but we don't expect applications to
++     * show that error to users, but call the missing plugins functions */
++    g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_UNSUPPORTED_PROTOCOL,
++        _("No URI handler for the %s protocol found"), protocol);
++    g_free (protocol);
++    return NULL;
++  }
++  g_free (protocol);
++
++  possibilities = g_list_sort (possibilities, (GCompareFunc) sort_by_rank);
++  walk = possibilities;
++  while (walk) {
++    GstElementFactory *factory = walk->data;
++    GError *uri_err = NULL;
++
++    const gchar *factory_name = gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(factory));
++    GST_DEBUG("find possible matched factory name %s", factory_name);
++
++    if(use_iso_src && 0 != g_strcasecmp(factory_name, "isosrc")){
++        walk = walk->next;
++        continue;
++    }
++
++    if(use_http_pull && 0 != g_strcasecmp(factory_name, "httppullsrc")){
++        walk = walk->next;
++        continue;
++    }
++
++    if(use_smb_push && 0 != g_strcasecmp(factory_name, "smbpushsrc")){
++        walk = walk->next;
++        continue;
++    }
++
++    ret = gst_element_factory_create (factory, elementname);
++    if (ret != NULL) {
++      GstURIHandler *handler = GST_URI_HANDLER (ret);
++
++      if (gst_uri_handler_set_uri (handler, uri, &uri_err))
++        break;
++
++      GST_WARNING ("%s didn't accept URI '%s': %s", GST_OBJECT_NAME (ret), uri,
++          uri_err->message);
++
++      if (error != NULL && *error == NULL)
++        g_propagate_error (error, uri_err);
++      else
++        g_error_free (uri_err);
++
++      gst_object_unref (ret);
++      ret = NULL;
++    }
++
++  }
++  gst_plugin_feature_list_free (possibilities);
++
++  GST_LOG_OBJECT (ret, "created %s for URL '%s'",
++      type == GST_URI_SINK ? "sink" : "source", uri);
++
++  /* if the first handler didn't work, but we found another one that works */
++  if (ret != NULL)
++    g_clear_error (error);
++
++  return ret;
++}
++#endif
++
+ /**
+  * gst_element_make_from_uri:
+  * @type: Whether to create a source or a sink
+diff --git a/subprojects/gstreamer/gst/gsturi.h b/subprojects/gstreamer/gst/gsturi.h
+index 8c5881bec8..f1dbcbf138 100644
+--- a/subprojects/gstreamer/gst/gsturi.h
++++ b/subprojects/gstreamer/gst/gsturi.h
+@@ -162,7 +162,16 @@ GstElement *    gst_element_make_from_uri       (const GstURIType type,
+                                                  const gchar *    uri,
+                                                  const gchar *    elementname,
+                                                  GError      **   error) G_GNUC_MALLOC;
+-
++#ifdef TCL_PATCH
++GST_API
++GstElement *    gst_element_make_from_uri_ext       (const GstURIType type,
++                                                 const gchar *    uri,
++                                                 const gchar *    elementname,
++                                                 GError      **   error,
++                                                 gboolean         use_htttp_pull,
++                                                 gboolean         use_smb_push,
++                                                 gboolean         use_iso_src) G_GNUC_MALLOC;
++#endif
+ /* accessing the interface */
+ 
+ GST_API
+diff --git a/subprojects/gstreamer/libs/gst/base/gstadapter.c b/subprojects/gstreamer/libs/gst/base/gstadapter.c
+index 89f2e7160f..3114472187 100644
+--- a/subprojects/gstreamer/libs/gst/base/gstadapter.c
++++ b/subprojects/gstreamer/libs/gst/base/gstadapter.c
+@@ -989,11 +989,17 @@ gst_adapter_get_buffer (GstAdapter * adapter, gsize nbytes)
+     GST_LOG_OBJECT (adapter, "providing buffer of %" G_GSIZE_FORMAT " bytes"
+         " as head buffer", nbytes);
+     buffer = gst_buffer_ref (cur);
++#ifdef TCL_PATCH
++    GST_BUFFER_PTS(buffer) = GST_BUFFER_PTS(cur);
++#endif
+     goto done;
+   } else if (hsize >= nbytes + skip) {
+     GST_LOG_OBJECT (adapter, "providing buffer of %" G_GSIZE_FORMAT " bytes"
+         " via region copy", nbytes);
+     buffer = gst_buffer_copy_region (cur, GST_BUFFER_COPY_ALL, skip, nbytes);
++#ifdef TCL_PATCH
++    GST_BUFFER_PTS(buffer) = GST_BUFFER_PTS(cur);
++#endif
+     goto done;
+   }
+ #if 0
+@@ -1027,7 +1033,9 @@ gst_adapter_get_buffer (GstAdapter * adapter, gsize nbytes)
+ 
+       gst_buffer_foreach_meta (cur, foreach_metadata, buffer);
+       read_offset += gst_buffer_get_size (cur);
+-
++#ifdef TCL_PATCH
++      GST_BUFFER_PTS(buffer) = GST_BUFFER_PTS(cur);
++#endif
+       idx++;
+     }
+   }
+diff --git a/subprojects/gstreamer/libs/gst/base/gstbaseparse.c b/subprojects/gstreamer/libs/gst/base/gstbaseparse.c
+index 391dd2166f..39a76acb6d 100644
+--- a/subprojects/gstreamer/libs/gst/base/gstbaseparse.c
++++ b/subprojects/gstreamer/libs/gst/base/gstbaseparse.c
+@@ -345,6 +345,9 @@ struct _GstBaseParsePrivate
+ 
+   /* Current segment seqnum */
+   guint32 segment_seqnum;
++#ifdef TCL_PATCH
++  gboolean drop;
++#endif
+ };
+ 
+ typedef struct _GstBaseParseSeek
+@@ -361,6 +364,9 @@ enum
+ {
+   PROP_0,
+   PROP_DISABLE_PASSTHROUGH,
++#ifdef TCL_PATCH
++  PROP_DISABLE_DROP_FRAME_BEFORE_SEG,
++#endif
+   PROP_LAST
+ };
+ 
+@@ -566,7 +572,12 @@ gst_base_parse_class_init (GstBaseParseClass * klass)
+           "Force processing (disables passthrough)",
+           DEFAULT_DISABLE_PASSTHROUGH,
+           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+-
++#ifdef TCL_PATCH
++  g_object_class_install_property (gobject_class, PROP_DISABLE_DROP_FRAME_BEFORE_SEG,
++      g_param_spec_boolean ("disable-dropframe-befseg", "Disable drop frame before segment",
++          "Disable drop frame before segment",
++          FALSE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++#endif
+   gstelement_class = (GstElementClass *) klass;
+   gstelement_class->change_state =
+       GST_DEBUG_FUNCPTR (gst_base_parse_change_state);
+@@ -645,6 +656,9 @@ gst_base_parse_init (GstBaseParse * parse, GstBaseParseClass * bclass)
+   parse->priv->parser_tags = NULL;
+   parse->priv->parser_tags_merge_mode = GST_TAG_MERGE_APPEND;
+   parse->priv->disable_passthrough = DEFAULT_DISABLE_PASSTHROUGH;
++#ifdef TCL_PATCH
++  parse->disable_drop_frame_before_seg = FALSE;
++#endif
+ }
+ 
+ static void
+@@ -657,6 +671,11 @@ gst_base_parse_set_property (GObject * object, guint prop_id,
+     case PROP_DISABLE_PASSTHROUGH:
+       parse->priv->disable_passthrough = g_value_get_boolean (value);
+       break;
++#ifdef TCL_PATCH
++    case PROP_DISABLE_DROP_FRAME_BEFORE_SEG:
++      parse->disable_drop_frame_before_seg= g_value_get_boolean (value);
++      break;
++#endif
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+       break;
+@@ -673,6 +692,11 @@ gst_base_parse_get_property (GObject * object, guint prop_id, GValue * value,
+     case PROP_DISABLE_PASSTHROUGH:
+       g_value_set_boolean (value, parse->priv->disable_passthrough);
+       break;
++#ifdef TCL_PATCH
++    case PROP_DISABLE_DROP_FRAME_BEFORE_SEG:
++      g_value_set_boolean (value, parse->disable_drop_frame_before_seg);
++      break;
++#endif
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+       break;
+@@ -899,9 +923,11 @@ gst_base_parse_reset (GstBaseParse * parse)
+   g_list_free (parse->priv->detect_buffers);
+   parse->priv->detect_buffers = NULL;
+   parse->priv->detect_buffers_size = 0;
+-
+   parse->priv->segment_seqnum = GST_SEQNUM_INVALID;
+   parse->priv->posted_latency_msg = FALSE;
++#ifdef TCL_PATCH
++  parse->priv->drop = FALSE;
++#endif
+   GST_OBJECT_UNLOCK (parse);
+ }
+ 
+@@ -1042,11 +1068,13 @@ gst_base_parse_parse_frame (GstBaseParse * parse, GstBaseParseFrame * frame)
+      * durations. PTS and DTS are either both approximated or both from the
+      * original buffer timestamp. Set PTS = DTS because the opposite has been
+      * observed to cause DTS going backwards */
++#ifndef TCL_PATCH
+     GST_LOG_OBJECT (parse,
+         "Found DTS (%" GST_TIME_FORMAT ") > PTS (%" GST_TIME_FORMAT
+         "), set PTS = DTS", GST_TIME_ARGS (GST_BUFFER_DTS (buffer)),
+         GST_TIME_ARGS (GST_BUFFER_PTS (buffer)));
+     GST_BUFFER_PTS (buffer) = GST_BUFFER_DTS (buffer);
++#endif
+   }
+ 
+   if (!GST_BUFFER_DURATION_IS_VALID (buffer) &&
+@@ -1418,7 +1446,11 @@ gst_base_parse_sink_event_default (GstBaseParse * parse, GstEvent * event)
+         gst_base_parse_finish_fragment (parse, TRUE);
+ 
+       /* If we STILL have zero frames processed, fire an error */
++#ifdef TCL_PATCH
++     if (parse->priv->framecount == 0 && !parse->priv->drop && !parse->priv->saw_gaps &&
++#else
+       if (parse->priv->framecount == 0 && !parse->priv->saw_gaps &&
++#endif
+           !parse->priv->first_buffer) {
+         GST_ELEMENT_ERROR (parse, STREAM, WRONG_TYPE,
+             ("No valid frames found before end of stream"), (NULL));
+@@ -2575,7 +2607,13 @@ gst_base_parse_push_frame (GstBaseParse * parse, GstBaseParseFrame * frame)
+       if (parse->priv->seen_keyframe) {
+         GST_LOG_OBJECT (parse, "Frame before segment, after keyframe");
+         ret = GST_FLOW_OK;
+-      } else {
++      }
++#ifdef TCL_PATCH
++      else if (parse->disable_drop_frame_before_seg){
++        GST_LOG_OBJECT (parse, "Dont drop frame, before segment");
++      }
++#endif
++      else {
+         GST_LOG_OBJECT (parse, "Dropped frame, before segment");
+         ret = GST_BASE_PARSE_FLOW_DROPPED;
+       }
+@@ -4136,7 +4174,25 @@ gst_base_parse_get_duration (GstBaseParse * parse, GstFormat format,
+     *duration = parse->priv->estimated_duration;
+     res = TRUE;
+   } else {
+-    GST_LOG_OBJECT (parse, "cannot estimate duration");
++#ifdef TCL_PATCH
++  gchar* name = gst_element_get_name (parse);
++  if (strstr(name, "ac3parse") || strstr(name, "dcaparse")) {
++    // start estimating duration
++    gst_base_parse_update_duration (parse);
++    if (parse->priv->estimated_duration > 0) {
++      GST_LOG_OBJECT (parse, "using estimated duration");
++      *duration = parse->priv->estimated_duration;
++      res = TRUE;
++    } else {
++      GST_WARNING_OBJECT (parse, "estimate duration failed");
++    }
++  } else {
++    /* Temporary other parses cannot estimate duration */
++    GST_WARNING_OBJECT (parse, "cannot estimate duration");
++  }
++#else
++  GST_LOG_OBJECT (parse, "cannot estimate duration");
++#endif
+   }
+ 
+   GST_LOG_OBJECT (parse, "res: %d, duration %" GST_TIME_FORMAT, res,
+@@ -5061,3 +5117,30 @@ gst_base_parse_merge_tags (GstBaseParse * parse, GstTagList * tags,
+ 
+   GST_OBJECT_UNLOCK (parse);
+ }
++
++#ifdef TCL_PATCH
++void
++gst_base_parse_set_drop_stream (GstBaseParse * parse, gboolean drop)
++{
++  GstStructure *structure = NULL;
++  g_return_if_fail (parse != NULL);
++  parse->priv->drop = drop;
++  GST_LOG_OBJECT (parse, "set drop: %d", drop);
++  structure = gst_structure_new_empty ("application/x-custom-stream-drop");
++  if (!gst_pad_push_event (GST_BASE_PARSE_SINK_PAD (parse), gst_event_new_custom (GST_EVENT_CUSTOM_UPSTREAM, structure))){
++    GST_ERROR_OBJECT (parse, "Could not update stream-drop");
++  }
++}
++
++void
++gst_base_parse_get_ts_at_offset (GstBaseParse *parse, gsize offset, GstClockTime* pts, GstClockTime* dts)
++{
++  if (pts != NULL) {
++    *pts = gst_adapter_prev_pts_at_offset (parse->priv->adapter, offset, NULL);
++  }
++
++  if (dts != NULL) {
++    *dts = gst_adapter_prev_dts_at_offset (parse->priv->adapter, offset, NULL);
++  }
++}
++#endif
+diff --git a/subprojects/gstreamer/libs/gst/base/gstbaseparse.h b/subprojects/gstreamer/libs/gst/base/gstbaseparse.h
+index 06e4409505..59fa044539 100644
+--- a/subprojects/gstreamer/libs/gst/base/gstbaseparse.h
++++ b/subprojects/gstreamer/libs/gst/base/gstbaseparse.h
+@@ -173,6 +173,9 @@ struct _GstBaseParse {
+ 
+   /*< private >*/
+   gpointer       _gst_reserved[GST_PADDING_LARGE];
++#ifdef TCL_PATCH
++  gboolean disable_drop_frame_before_seg;
++#endif
+   GstBaseParsePrivate *priv;
+ };
+ 
+@@ -375,7 +378,16 @@ GST_BASE_API
+ void            gst_base_parse_merge_tags       (GstBaseParse  * parse,
+                                                  GstTagList    * tags,
+                                                  GstTagMergeMode mode);
+-
++#ifdef TCL_PATCH
++GST_BASE_API
++void            gst_base_parse_set_drop_stream (GstBaseParse * parse,
++                                                gboolean drop);
++GST_BASE_API
++void            gst_base_parse_get_ts_at_offset (GstBaseParse *parse,
++                                                 gsize offset,
++                                                 GstClockTime* pts,
++                                                 GstClockTime* dts);
++#endif
+ G_DEFINE_AUTOPTR_CLEANUP_FUNC(GstBaseParseFrame, gst_base_parse_frame_free)
+ 
+ G_DEFINE_AUTOPTR_CLEANUP_FUNC(GstBaseParse, gst_object_unref)
+diff --git a/subprojects/gstreamer/libs/gst/base/gstbasesink.c b/subprojects/gstreamer/libs/gst/base/gstbasesink.c
+index 751986d911..9fce518837 100644
+--- a/subprojects/gstreamer/libs/gst/base/gstbasesink.c
++++ b/subprojects/gstreamer/libs/gst/base/gstbasesink.c
+@@ -726,6 +726,9 @@ gst_base_sink_init (GstBaseSink * basesink, gpointer g_class)
+ 
+   priv->drop_out_of_segment = DEFAULT_DROP_OUT_OF_SEGMENT;
+ 
++#ifdef TCL_PATCH
++  basesink->skip_video = FALSE;
++#endif
+   GST_OBJECT_FLAG_SET (basesink, GST_ELEMENT_FLAG_SINK);
+ }
+ 
+@@ -760,6 +763,10 @@ gst_base_sink_set_sync (GstBaseSink * sink, gboolean sync)
+ 
+   GST_OBJECT_LOCK (sink);
+   sink->sync = sync;
++#ifdef TCL_PATCH
++  if (sync)
++    sink->have_newsegment = FALSE;
++#endif
+   GST_OBJECT_UNLOCK (sink);
+ }
+ 
+@@ -3331,7 +3338,10 @@ gst_base_sink_default_event (GstBaseSink * basesink, GstEvent * event)
+     case GST_EVENT_FLUSH_START:
+     {
+       GST_DEBUG_OBJECT (basesink, "flush-start %p", event);
+-      gst_base_sink_flush_start (basesink, basesink->sinkpad);
++#ifdef TCL_PATCH
++      if (basesink->skip_video != TRUE)
++#endif
++        gst_base_sink_flush_start (basesink, basesink->sinkpad);
+       break;
+     }
+     case GST_EVENT_FLUSH_STOP:
+@@ -3802,9 +3812,21 @@ gst_base_sink_chain_unlocked (GstBaseSink * basesink, GstPad * pad,
+ 
+     /* this means this sink will assume timestamps start from 0 */
+     GST_OBJECT_LOCK (basesink);
++#ifdef TCL_PATCH
++    GST_DEBUG_OBJECT  (basesink, "[ %s ] %s( %d ) buffer without a new-segment, setting segment start pts( %lld )\n", __FILE__, __func__, __LINE__, GST_BUFFER_PTS (sync_buf));
++    if (GST_CLOCK_TIME_IS_VALID(GST_BUFFER_PTS (sync_buf))){
++        segment->start = GST_BUFFER_PTS (sync_buf);
++      basesink->segment.start = GST_BUFFER_PTS (sync_buf);
++    } else {
++      segment->start = 0;
++      basesink->segment.start = 0;
++    }
++    segment->stop = -1;
++#else
+     segment->start = 0;
+     segment->stop = -1;
+     basesink->segment.start = 0;
++#endif
+     basesink->segment.stop = -1;
+     basesink->have_newsegment = TRUE;
+     GST_OBJECT_UNLOCK (basesink);
+@@ -3839,10 +3861,21 @@ gst_base_sink_chain_unlocked (GstBaseSink * basesink, GstPad * pad,
+     if (GST_CLOCK_TIME_IS_VALID (end))
+       pts_end = pts + (end - start);
+ 
++#ifdef TCL_PATCH
++    if (!(GST_BUFFER_FLAG_IS_SET(GST_BUFFER_CAST (obj), GST_BUFFER_FLAG_DROPPABLE) &&
++        GST_BUFFER_PTS (GST_BUFFER_CAST (obj)) == 0)) {
++          if (G_UNLIKELY (!gst_segment_clip (segment, GST_FORMAT_TIME, pts, pts_end, NULL, NULL))
++                    && G_UNLIKELY (!gst_segment_clip (segment, GST_FORMAT_TIME, start, end, NULL, NULL))
++                    && priv->drop_out_of_segment && GST_BUFFER_FLAG_IS_SET(GST_BUFFER_CAST (obj), GST_BUFFER_FLAG_DELTA_UNIT)) {
++          //  goto out_of_segment;
++        }
++    }
++#else
+     if (G_UNLIKELY (!gst_segment_clip (segment,
+                 GST_FORMAT_TIME, pts, pts_end, NULL, NULL)
+             && priv->drop_out_of_segment))
+       goto out_of_segment;
++#endif
+   }
+ 
+   if (bclass->prepare || bclass->prepare_list) {
+@@ -5026,6 +5059,11 @@ gst_base_sink_send_event (GstElement * element, GstEvent * event)
+       result = gst_base_sink_perform_step (basesink, pad, event);
+       forward = FALSE;
+       break;
++#ifdef TCL_PATCH
++    case GST_EVENT_CUSTOM_SKIP_VIDEO:
++      basesink->skip_video = TRUE;
++      break;
++#endif
+     default:
+       break;
+   }
+@@ -5636,6 +5674,19 @@ gst_base_sink_sink_query (GstPad * pad, GstObject * parent, GstQuery * query)
+   basesink = GST_BASE_SINK_CAST (parent);
+   bclass = GST_BASE_SINK_GET_CLASS (basesink);
+ 
++#ifdef TCL_PATCH
++  if(GST_QUERY_TYPE (query) == GST_QUERY_PAD_PENDING)
++  {
++    GstState  cur_state     = GST_STATE_VOID_PENDING;
++    GstState  pending_state = GST_STATE_PAUSED;
++    gst_element_get_state(basesink, &cur_state, &pending_state, GST_SECOND / 2);
++    if(cur_state < GST_STATE_PAUSED)
++      return FALSE;
++
++    return TRUE;
++  }
++#endif
++
+   if (bclass->query)
+     res = bclass->query (basesink, query);
+   else
+diff --git a/subprojects/gstreamer/libs/gst/base/gstbasesink.h b/subprojects/gstreamer/libs/gst/base/gstbasesink.h
+index e68560c6f5..cef842074b 100644
+--- a/subprojects/gstreamer/libs/gst/base/gstbasesink.h
++++ b/subprojects/gstreamer/libs/gst/base/gstbasesink.h
+@@ -103,6 +103,9 @@ struct _GstBaseSink {
+   GstBaseSinkPrivate *priv;
+ 
+   gpointer _gst_reserved[GST_PADDING_LARGE];
++#ifdef TCL_PATCH
++  gboolean skip_video;
++#endif
+ };
+ 
+ /**
+diff --git a/subprojects/gstreamer/libs/gst/base/gstbasesrc.c b/subprojects/gstreamer/libs/gst/base/gstbasesrc.c
+index 28259f42a5..de9040dab9 100644
+--- a/subprojects/gstreamer/libs/gst/base/gstbasesrc.c
++++ b/subprojects/gstreamer/libs/gst/base/gstbasesrc.c
+@@ -2616,6 +2616,11 @@ again:
+   if (G_UNLIKELY (ret != GST_FLOW_OK))
+     goto not_ok;
+ 
++#ifdef TCL_PATCH
++  if (res_buf == NULL)
++    goto not_ok;
++#endif
++
+   /* fallback in case the create function didn't fill a provided buffer */
+   if (in_buf != NULL && res_buf != in_buf) {
+     GstMapInfo info;
+@@ -2656,6 +2661,10 @@ again:
+   }
+ 
+   /* now sync before pushing the buffer */
++#ifdef TCL_PATCH
++  if (res_buf == NULL)
++    goto not_ok;
++#endif
+   status = gst_base_src_do_sync (src, res_buf);
+ 
+   /* waiting for the clock could have made us flushing */
+diff --git a/subprojects/gstreamer/libs/gst/base/gsttypefindhelper.c b/subprojects/gstreamer/libs/gst/base/gsttypefindhelper.c
+index 56003d500a..7ca3d1c64f 100644
+--- a/subprojects/gstreamer/libs/gst/base/gsttypefindhelper.c
++++ b/subprojects/gstreamer/libs/gst/base/gsttypefindhelper.c
+@@ -499,6 +499,18 @@ typedef struct
+   GstObject *obj;               /* for logging */
+ } GstTypeFindBufHelper;
+ 
++#ifdef TCL_PATCH
++static guint64
++buf_helper_find_get_length (gpointer data)
++{
++  GstTypeFindBufHelper *helper = (GstTypeFindBufHelper *) data;
++
++  GST_LOG_OBJECT (helper->obj, "'%s' called get_length, returning %"
++      G_GUINT64_FORMAT, GST_OBJECT_NAME (helper->factory), helper->size);
++
++  return helper->size;
++}
++#endif
+ /*
+  * buf_helper_find_peek:
+  * @data: helper data struct
+@@ -656,7 +668,12 @@ gst_type_find_helper_for_data_with_extension (GstObject * obj,
+   find.data = &helper;
+   find.peek = buf_helper_find_peek;
+   find.suggest = buf_helper_find_suggest;
++
++#ifdef TCL_PATCH
++  find.get_length = buf_helper_find_get_length;
++#else
+   find.get_length = NULL;
++#endif
+ 
+   type_list = gst_type_find_factory_get_list ();
+   type_list = prioritize_extension (obj, type_list, extension);
+diff --git a/subprojects/gstreamer/plugins/elements/gstfilesrc.c b/subprojects/gstreamer/plugins/elements/gstfilesrc.c
+index 62ffb202f4..f28ac2b278 100644
+--- a/subprojects/gstreamer/plugins/elements/gstfilesrc.c
++++ b/subprojects/gstreamer/plugins/elements/gstfilesrc.c
+@@ -114,7 +114,12 @@ enum
+ enum
+ {
+   PROP_0,
+-  PROP_LOCATION
++  PROP_LOCATION,
++#ifdef TCL_PATCH
++  PROP_FD,
++  PROP_START_OFFSET,
++  PROP_LENGTH,
++#endif
+ };
+ 
+ static void gst_file_src_finalize (GObject * object);
+@@ -163,6 +168,23 @@ gst_file_src_class_init (GstFileSrcClass * klass)
+           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
+           GST_PARAM_MUTABLE_READY));
+ 
++#ifdef TCL_PATCH
++  g_object_class_install_property (gobject_class, PROP_FD,
++      g_param_spec_int ("fd", "File Fd",
++          "Fd for file to read", G_MININT, G_MAXINT, -1,
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
++          GST_PARAM_MUTABLE_READY));
++
++  g_object_class_install_property (gobject_class, PROP_START_OFFSET,
++      g_param_spec_int64 ("start-offset", "Start Offset",
++          "Start offset for file to read", G_MININT64, G_MAXINT64, 0,
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_class, PROP_LENGTH,
++        g_param_spec_int64 ("length", "Length",
++            "Length for file to read", G_MININT64, G_MAXINT64, 0,
++            G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++#endif
+   gobject_class->finalize = gst_file_src_finalize;
+ 
+   gst_element_class_set_static_metadata (gstelement_class,
+@@ -188,11 +210,15 @@ static void
+ gst_file_src_init (GstFileSrc * src)
+ {
+   src->filename = NULL;
+-  src->fd = 0;
++  src->fd = -1;
+   src->uri = NULL;
+ 
+   src->is_regular = FALSE;
+ 
++#ifdef TCL_PATCH
++  src->start_offset = 0;
++  src->length = 0;
++#endif
+   gst_base_src_set_blocksize (GST_BASE_SRC (src), DEFAULT_BLOCKSIZE);
+ }
+ 
+@@ -270,6 +296,36 @@ gst_file_src_set_property (GObject * object, guint prop_id,
+     case PROP_LOCATION:
+       gst_file_src_set_location (src, g_value_get_string (value), NULL);
+       break;
++
++#ifdef TCL_PATCH
++    case PROP_FD:
++    {
++      gint fd = g_value_get_int (value);
++      GST_INFO("fd = %d",fd);
++      if (fd != -1) {
++        src->fd = fd;
++      }
++      break;
++    }
++    case PROP_START_OFFSET:
++    {
++      gint64 start_offset = g_value_get_int64 (value);
++      GST_INFO("start_offset = %lld",start_offset);
++      if (start_offset!= 0) {
++        src->start_offset = start_offset;
++      }
++      break;
++    }
++    case PROP_LENGTH:
++    {
++      gint64 length = g_value_get_int64 (value);
++      GST_INFO("length = %lld",length);
++      if (length != 0) {
++        src->length = length;
++      }
++      break;
++    }
++#endif
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+       break;
+@@ -290,6 +346,17 @@ gst_file_src_get_property (GObject * object, guint prop_id, GValue * value,
+     case PROP_LOCATION:
+       g_value_set_string (value, src->filename);
+       break;
++#ifdef TCL_PATCH
++    case PROP_FD:
++      g_value_set_int (value, src->fd);
++      break;
++    case PROP_START_OFFSET:
++      g_value_set_int64 (value, src->start_offset);
++      break;
++    case PROP_LENGTH:
++      g_value_set_int (value, src->length);
++      break;
++#endif
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+       break;
+@@ -320,9 +387,13 @@ gst_file_src_fill (GstBaseSrc * basesrc, guint64 offset, guint length,
+ 
+   if (G_UNLIKELY (offset != -1 && src->read_position != offset)) {
+     off_t res;
+-
++#ifdef TCL_PATCH
++    res = lseek (src->fd, offset + src->start_offset, SEEK_SET);
++    if (G_UNLIKELY (res < 0 || res != (offset +src->start_offset)))
++#else
+     res = lseek (src->fd, offset, SEEK_SET);
+     if (G_UNLIKELY (res < 0 || res != offset))
++#endif
+       goto seek_failed;
+ 
+     src->read_position = offset;
+@@ -359,6 +430,17 @@ gst_file_src_fill (GstBaseSrc * basesrc, guint64 offset, guint length,
+     src->read_position += ret;
+   }
+ 
++#ifdef TCL_PATCH
++  if (src->start_offset && src->length) {
++    if (offset >= src->length) {
++        GST_INFO ("offset >= src->length,is EOS ");
++        goto eos;
++    } else if ((bytes_read + offset) >= src->length) {
++        GST_INFO ("(bytes_read + offset) >= src->length ");
++        bytes_read = src->length - offset;
++    }
++  }
++#endif
+   gst_buffer_unmap (buf, &info);
+   if (bytes_read != length)
+     gst_buffer_resize (buf, 0, bytes_read);
+@@ -431,12 +513,25 @@ gst_file_src_get_size (GstBaseSrc * basesrc, guint64 * size)
+   }
+ #else
+   {
++#ifdef TCL_PATCH
++    if (src->start_offset && src->length) {
++      *size = (guint64)src->length;
++    } else {
++      struct_stat stat_results;
++
++      if (fstat (src->fd, &stat_results) < 0)
++        goto could_not_stat;
++
++      *size = stat_results.st_size;
++    }
++#else
+     struct_stat stat_results;
+ 
+     if (fstat (src->fd, &stat_results) < 0)
+       goto could_not_stat;
+ 
+     *size = stat_results.st_size;
++#endif
+   }
+ #endif
+ 
+@@ -464,11 +559,21 @@ gst_file_src_start (GstBaseSrc * basesrc)
+ 
+   GST_INFO_OBJECT (src, "opening file %s", src->filename);
+ 
++#ifdef TCL_PATCH
++  if (src->fd < 0) {
++    /* open the file */
++    src->fd = g_open (src->filename, flags, 0);
++
++    if (src->fd < 0)
++     goto open_failed;
++  }
++#else
+   /* open the file */
+   src->fd = g_open (src->filename, flags, 0);
+ 
+   if (src->fd < 0)
+     goto open_failed;
++#endif
+ 
+ #ifdef G_OS_WIN32
+   {
+@@ -600,11 +705,14 @@ gst_file_src_stop (GstBaseSrc * basesrc)
+ {
+   GstFileSrc *src = GST_FILE_SRC (basesrc);
+ 
++#ifdef TCL_PATCH
++#else
+   /* close the file */
+   g_close (src->fd, NULL);
+ 
+   /* zero out a lot of our state */
+   src->fd = 0;
++#endif
+   src->is_regular = FALSE;
+ 
+   return TRUE;
+diff --git a/subprojects/gstreamer/plugins/elements/gstfilesrc.h b/subprojects/gstreamer/plugins/elements/gstfilesrc.h
+index e73cfc3d5e..477e7d2f1d 100644
+--- a/subprojects/gstreamer/plugins/elements/gstfilesrc.h
++++ b/subprojects/gstreamer/plugins/elements/gstfilesrc.h
+@@ -63,6 +63,10 @@ struct _GstFileSrc {
+   gboolean seekable;                    /* whether the file is seekable */
+   gboolean is_regular;                  /* whether it's a (symlink to a)
+                                            regular file */
++#ifdef TCL_PATCH
++  gint64 start_offset;
++  gint64 length;
++#endif
+ };
+ 
+ struct _GstFileSrcClass {
+diff --git a/subprojects/gstreamer/plugins/elements/gstinputselector.c b/subprojects/gstreamer/plugins/elements/gstinputselector.c
+index 63105585aa..361f020d32 100644
+--- a/subprojects/gstreamer/plugins/elements/gstinputselector.c
++++ b/subprojects/gstreamer/plugins/elements/gstinputselector.c
+@@ -44,6 +44,7 @@
+ #ifdef HAVE_CONFIG_H
+ #include "config.h"
+ #endif
++#include <unistd.h>
+ 
+ #include <string.h>
+ 
+@@ -82,6 +83,11 @@ gst_input_selector_sync_mode_get_type (void)
+ 			GST_INPUT_SELECTOR_GET_LOCK(sel)))
+ #define GST_INPUT_SELECTOR_BROADCAST(sel) (g_cond_broadcast (GST_INPUT_SELECTOR_GET_COND(sel)))
+ 
++#ifdef TCL_PATCH
++#define GST_INPUT_SELECTOR_TIMED_WAIT(sel, timeout) (g_cond_timed_wait (GST_INPUT_SELECTOR_GET_COND(sel), \
++			GST_INPUT_SELECTOR_GET_LOCK(sel), \
++			timeout))
++#endif
+ static GstStaticPadTemplate gst_input_selector_sink_factory =
+ GST_STATIC_PAD_TEMPLATE ("sink_%u",
+     GST_PAD_SINK,
+@@ -101,13 +107,24 @@ enum
+   PROP_ACTIVE_PAD,
+   PROP_SYNC_STREAMS,
+   PROP_SYNC_MODE,
+-  PROP_CACHE_BUFFERS
++  PROP_CACHE_BUFFERS,
++#ifdef TCL_PATCH
++  PROP_IS_SUBTITLE,
++  PROP_IS_AUDIO,
++  PROP_IS_VIDEO,
++  PROP_DECODER_PTS
++#endif
+ };
+ 
+ #define DEFAULT_SYNC_STREAMS TRUE
+ #define DEFAULT_SYNC_MODE GST_INPUT_SELECTOR_SYNC_MODE_ACTIVE_SEGMENT
+ #define DEFAULT_CACHE_BUFFERS FALSE
+ #define DEFAULT_PAD_ALWAYS_OK TRUE
++#ifdef TCL_PATCH
++#define DEFAULT_IS_SUBTITLE   FALSE
++#define DEFAULT_IS_AUDIO   FALSE
++#define DEFAULT_IS_VIDEO   FALSE
++#endif
+ 
+ enum
+ {
+@@ -165,6 +182,13 @@ struct _GstSelectorPad
+ 
+   gboolean sending_cached_buffers;
+   GQueue *cached_buffers;
++
++#ifdef TCL_PATCH
++  GstClockTime cur_waitting_time;
++  int switchtimes;//用于判断对比该pad和总inputselector的切换次数是否一样
++  gboolean cached_exit;//表示cache循环结束，chain函数准备推送来自demux的frame标志位
++  gboolean pthread_eos;//表示重新创建的pthread也已经eos了
++#endif
+ };
+ 
+ struct _GstSelectorPadCachedBuffer
+@@ -344,6 +368,13 @@ gst_selector_pad_reset (GstSelectorPad * pad)
+   pad->flushing = FALSE;
+   gst_segment_init (&pad->segment, GST_FORMAT_UNDEFINED);
+   pad->sending_cached_buffers = FALSE;
++
++#ifdef TCL_PATCH
++  pad->cur_waitting_time = GST_CLOCK_TIME_NONE;
++  pad->switchtimes = 0;
++  pad->cached_exit = FALSE;
++  pad->pthread_eos = TRUE;
++#endif
+   gst_selector_pad_free_cached_buffers (pad);
+   GST_OBJECT_UNLOCK (pad);
+ }
+@@ -361,7 +392,11 @@ gst_selector_pad_new_cached_buffer (GstSelectorPad * selpad, GstBuffer * buffer)
+ static void
+ gst_selector_pad_free_cached_buffer (GstSelectorPadCachedBuffer * cached_buffer)
+ {
++#ifdef TCL_PATCH
++  if (cached_buffer && cached_buffer->buffer)
++#else
+   if (cached_buffer->buffer)
++#endif
+     gst_buffer_unref (cached_buffer->buffer);
+   g_slice_free (GstSelectorPadCachedBuffer, cached_buffer);
+ }
+@@ -447,8 +482,45 @@ forward_sticky_events (GstPad * sinkpad, GstEvent ** event, gpointer user_data)
+     } else {
+       gst_event_unref (tmp);
+     }
++#ifdef TCL_PATCH
++  } else if (GST_EVENT_TYPE (*event) == GST_EVENT_STREAM_START
++      && sel->is_update_caps && sel->is_audio) {
++    GstEvent *tmp =
++        gst_pad_get_sticky_event (sel->srcpad, GST_EVENT_EOS, 0);
++
++    if (tmp || GST_SELECTOR_PAD_CAST (sinkpad)->eos) {
++      // GST_INPUT_SELECTOR_LOCK (sel);
++      GstEvent *flush_start_event = gst_event_new_flush_start();
++      if(!gst_pad_push_event (sel->srcpad, flush_start_event)) {
++        GST_ERROR_OBJECT (sinkpad, "send event GST_EVENT_FLUSH_START fail");
++      } else {
++        GST_ERROR_OBJECT (sinkpad, "send evnet GST_EVENT_FLUSH_START success");
++      }
++      GstEvent *flush_stop_event = gst_event_new_flush_stop(TRUE);
++      if(!gst_pad_push_event (sel->srcpad, flush_stop_event)) {
++        GST_ERROR_OBJECT (sinkpad, "send event GST_EVENT_FLUSH_STOP fail");
++      } else {
++        GST_ERROR_OBJECT (sinkpad, "send evnet GST_EVENT_FLUSH_STOP success");
++      }
++      // GST_INPUT_SELECTOR_UNLOCK (sel);
++    } else {
++      GST_ERROR_OBJECT (sinkpad, "maybe temp = null or pad->eos = %d", GST_SELECTOR_PAD_CAST (sinkpad)->eos);
++      gst_event_unref (tmp);
++    }
++#endif
+   } else {
+-    gst_pad_push_event (sel->srcpad, gst_event_ref (*event));
++#ifdef TCL_PATCH
++    // 这里判断如果当前是已经eos过的音轨，并且当前是重新创建的chain线程，并且当前已经推送完最后一帧cache数据，
++    // 那么就设置pthread_eos标志位，并且发送eos消息
++    if (sel->is_audio && GST_EVENT_TYPE (*event) == GST_EVENT_EOS && GST_SELECTOR_PAD_CAST (sinkpad)->eos &&
++        GST_SELECTOR_PAD_CAST (sinkpad)->pthread_eos == FALSE && GST_SELECTOR_PAD_CAST (sinkpad)->cached_exit &&
++        GST_SELECTOR_PAD_CAST (sinkpad)->sending_cached_buffers == FALSE) {
++      GST_SELECTOR_PAD_CAST (sinkpad)->pthread_eos = TRUE;
++      gst_pad_push_event (sel->srcpad, gst_event_ref (*event));
++    }
++    if(!((sel->is_subtitle || (sel->is_audio && sel->is_update_caps)) && GST_EVENT_TYPE (*event) == GST_EVENT_EOS))
++#endif
++      gst_pad_push_event (sel->srcpad, gst_event_ref (*event));
+   }
+ 
+   return TRUE;
+@@ -458,7 +530,11 @@ static gboolean
+ gst_input_selector_eos_wait (GstInputSelector * self, GstSelectorPad * pad,
+     GstEvent * eos_event)
+ {
++#ifdef TCL_PATCH
++  while (!self->eos && !self->flushing && !pad->flushing && !(self->is_audio && self->is_update_caps)) {
++#else
+   while (!self->eos && !self->flushing && !pad->flushing) {
++#endif
+     GstPad *active_sinkpad;
+     active_sinkpad = gst_input_selector_get_active_sinkpad (self);
+     if (pad == GST_SELECTOR_PAD_CAST (active_sinkpad) && pad->eos
+@@ -522,6 +598,15 @@ gst_selector_pad_event (GstPad * pad, GstObject * parent, GstEvent * event)
+   GstPad *active_sinkpad;
+ 
+   sel = GST_INPUT_SELECTOR (parent);
++#ifdef TCL_PATCH
++  /* 屏蔽字幕不关心的事件 */
++  if (sel->is_subtitle == TRUE) {
++    if (GST_EVENT_TYPE(event) == GST_EVENT_GAP) {
++      gst_event_unref(event);
++      return TRUE;
++    }
++  }
++#endif
+   selpad = GST_SELECTOR_PAD_CAST (pad);
+   GST_DEBUG_OBJECT (selpad, "received event %" GST_PTR_FORMAT, event);
+ 
+@@ -570,7 +655,11 @@ gst_selector_pad_event (GstPad * pad, GstObject * parent, GstEvent * event)
+     {
+       gst_event_copy_segment (event, &selpad->segment);
+       selpad->segment_seqnum = gst_event_get_seqnum (event);
+-
++#ifdef TCL_PATCH
++      if (sel->is_subtitle || sel->is_audio)
++        sel->decoder_pts   = (GstClockTime)selpad->segment.start;
++      //GST_WARNING_OBJECT(pad, "sel->decoder_pts %" GST_TIME_FORMAT, GST_TIME_ARGS(sel->decoder_pts));
++#endif
+       GST_DEBUG_OBJECT (pad, "configured SEGMENT %" GST_SEGMENT_FORMAT,
+           &selpad->segment);
+       break;
+@@ -596,16 +685,25 @@ gst_selector_pad_event (GstPad * pad, GstObject * parent, GstEvent * event)
+       break;
+     }
+     case GST_EVENT_EOS:
+-      selpad->eos = TRUE;
+-      GST_DEBUG_OBJECT (pad, "received EOS");
+-      if (gst_input_selector_all_eos (sel)) {
+-        GST_DEBUG_OBJECT (pad, "All sink pad received EOS");
+-        sel->eos = TRUE;
+-        GST_INPUT_SELECTOR_BROADCAST (sel);
++#ifdef TCL_PATCH
++      if (sel->is_subtitle == FALSE) {
++#endif
++        selpad->eos = TRUE;
++        GST_DEBUG_OBJECT (pad, "received EOS");
++        if (gst_input_selector_all_eos (sel)) {
++          GST_DEBUG_OBJECT (pad, "All sink pad received EOS");
++          sel->eos = TRUE;
++          GST_INPUT_SELECTOR_BROADCAST (sel);
++        } else {
++          gst_input_selector_eos_wait (sel, selpad, event);
++          forward = FALSE;
++        }
++#ifdef TCL_PATCH
+       } else {
+-        gst_input_selector_eos_wait (sel, selpad, event);
+-        forward = FALSE;
++        /* 不能在此处push event,有死锁风险 */
++        forward         = FALSE;
+       }
++#endif
+       break;
+     case GST_EVENT_GAP:{
+       GstClockTime ts, dur;
+@@ -652,8 +750,15 @@ gst_selector_pad_event (GstPad * pad, GstObject * parent, GstEvent * event)
+      * For all other cases, we send the event immediately, which makes
+      * sparse streams and other segment updates work correctly downstream.
+      */
++#ifdef TCL_PATCH
++    if (sel->is_subtitle == FALSE || GST_EVENT_TYPE (event) != GST_EVENT_EOS) {
++      if (GST_EVENT_IS_STICKY (event))
++        selpad->events_pending = TRUE;
++    }
++#else
+     if (GST_EVENT_IS_STICKY (event))
+       selpad->events_pending = TRUE;
++#endif
+     gst_event_unref (event);
+   }
+ 
+@@ -708,6 +813,10 @@ static GstClockTime
+ gst_input_selector_get_clipped_running_time (GstSegment * seg, GstBuffer * buf)
+ {
+   GstClockTime running_time;
++#ifdef TCL_PATCH
++  if(!buf)
++    return -1;
++#endif
+ 
+   running_time = GST_BUFFER_PTS (buf);
+   /* If possible try to get the running time at the end of the buffer */
+@@ -725,6 +834,10 @@ gst_input_selector_get_clipped_running_time (GstSegment * seg, GstBuffer * buf)
+ 
+ /* must be called without the SELECTOR_LOCK, will wait until the running time
+  * of the active pad is after this pad or return TRUE when flushing */
++/** 让非激活的SinkPad一直等待running_time
++ * @return          TRUE : drop掉当前Buffer
++ *                  FALSE: 不drop掉当前Buffer
++ */
+ static gboolean
+ gst_input_selector_wait_running_time (GstInputSelector * sel,
+     GstSelectorPad * selpad, GstBuffer * buf)
+@@ -734,6 +847,7 @@ gst_input_selector_wait_running_time (GstInputSelector * sel,
+   GST_DEBUG_OBJECT (selpad, "entering wait for buffer %p", buf);
+ 
+   /* If we have no valid timestamp we can't sync this buffer */
++  /* 当当前的Buffer无PTS时，则无法同步，因此应当Flush掉 */
+   if (!GST_BUFFER_PTS_IS_VALID (buf)) {
+     GST_DEBUG_OBJECT (selpad, "leaving wait for buffer with "
+         "invalid timestamp");
+@@ -748,7 +862,11 @@ gst_input_selector_wait_running_time (GstInputSelector * sel,
+    *   c) the buffer running time is before the current running time
+    *      (either active-seg or clock, depending on sync-mode)
+    */
+-
++   /* 一直等待，直到满足以下条件退出:
++    *   a) 变为激活的SinkPad
++    *   b) 当前Pad/SelectInputor插件处于flushing状态
++    *   c) 当前Buffer的PTS滞后播放时间
++    */
+   GST_INPUT_SELECTOR_LOCK (sel);
+   while (TRUE) {
+     GstPad *active_sinkpad;
+@@ -760,13 +878,30 @@ gst_input_selector_wait_running_time (GstInputSelector * sel,
+     active_sinkpad = gst_input_selector_get_active_sinkpad (sel);
+     active_selpad = GST_SELECTOR_PAD_CAST (active_sinkpad);
+ 
++    // seg->format不为Time格式，则也无法计算出当前Buffer的时间
+     if (seg->format != GST_FORMAT_TIME) {
+       GST_DEBUG_OBJECT (selpad,
+           "Not waiting because we don't have a TIME segment");
+       GST_INPUT_SELECTOR_UNLOCK (sel);
+       return FALSE;
+     }
++#ifdef TCL_PATCH
++    running_time = GST_CLOCK_TIME_NONE;
++    // 计算当前Buffer的运行时间
++    if(sel->is_subtitle || sel->is_audio)
++        running_time = GST_BUFFER_PTS (buf);
++    else
++        running_time = gst_input_selector_get_clipped_running_time (seg, buf);
+ 
++    /* 当前Buffer的运行时间无效 */
++    if (running_time == GST_CLOCK_TIME_NONE) {
++        GST_DEBUG_OBJECT (selpad, "Not waiting because buffer is outside segment");
++        GST_INPUT_SELECTOR_UNLOCK (sel);
++        return FALSE;
++    }
++
++    cur_running_time = 0;
++#else
+     running_time = gst_input_selector_get_clipped_running_time (seg, buf);
+     /* If this is outside the segment don't sync */
+     if (running_time == -1) {
+@@ -777,6 +912,15 @@ gst_input_selector_wait_running_time (GstInputSelector * sel,
+     }
+ 
+     cur_running_time = GST_CLOCK_TIME_NONE;
++#endif
++
++#ifdef TCL_PATCH
++    // 只有字幕才采用decoder层返回的PTS做同步
++    if ((sel->is_subtitle == TRUE || sel->is_audio == TRUE) && sel->decoder_pts > 0) {
++      // 获取当前播放时间PTS
++      cur_running_time = sel->decoder_pts;
++    } else if(sel->is_subtitle == FALSE && sel->is_audio == FALSE) {
++#endif
+     if (sel->sync_mode == GST_INPUT_SELECTOR_SYNC_MODE_CLOCK) {
+       clock = gst_element_get_clock (GST_ELEMENT_CAST (sel));
+       if (clock) {
+@@ -812,15 +956,54 @@ gst_input_selector_wait_running_time (GstInputSelector * sel,
+             GST_FORMAT_TIME, active_seg->position);
+     }
+ 
++#ifdef TCL_PATCH
++    }
++#endif
+     /* Don't wait if the group is finished on the active pad,
+      * as the running time won't progress now */
++#ifdef TCL_PATCH
++    if (selpad != active_selpad && active_selpad->group_done &&
++        selpad->group_id == active_selpad->group_id && sel->is_subtitle != TRUE && sel->is_audio != TRUE) {
++#else
+     if (selpad != active_selpad && active_selpad->group_done &&
+         selpad->group_id == active_selpad->group_id) {
++#endif
+       GST_DEBUG_OBJECT (selpad, "Active pad received group-done. Unblocking");
+       GST_INPUT_SELECTOR_UNLOCK (sel);
+       break;
+     }
+ 
++#ifdef TCL_PATCH
++    /* 1.如果当前为非激活SinkPad
++     *  2.非Flushing,非EOS
++     *  3.非播放时间达到
++     */
++    //if (sel->is_audio) {
++    //  GST_WARNING_OBJECT(selpad, "running_time: %"GST_TIME_FORMAT, GST_TIME_ARGS(running_time));
++    //  GST_WARNING_OBJECT(selpad, "cur_running_time:%"GST_TIME_FORMAT, GST_TIME_ARGS(cur_running_time));
++    //}
++    if (selpad != active_selpad && !sel->eos && !sel->flushing && !selpad->flushing &&
++        (running_time >= cur_running_time)) {
++      selpad->cur_waitting_time = cur_running_time;
++      if (sel->is_video) {
++        GTimeVal end_time;
++        g_get_current_time(&end_time);
++        end_time.tv_sec += 1; // 1 s
++        gboolean wait_timeout = !GST_INPUT_SELECTOR_TIMED_WAIT(sel, &end_time);
++        if (wait_timeout) { // wait unlock timeout, Unlock and Exit
++          selpad->cur_waitting_time = GST_CLOCK_TIME_NONE;
++          GST_INPUT_SELECTOR_UNLOCK (sel);
++          break;
++        }
++      } else {
++        GST_INPUT_SELECTOR_WAIT(sel);
++      }
++    } else { // 否则可解锁退出
++      selpad->cur_waitting_time = GST_CLOCK_TIME_NONE;
++      GST_INPUT_SELECTOR_UNLOCK (sel);
++      break;
++    }
++#else
+     if (selpad != active_selpad && !sel->eos && !sel->flushing
+         && !selpad->flushing && (cur_running_time == GST_CLOCK_TIME_NONE
+             || running_time >= cur_running_time)) {
+@@ -833,6 +1016,7 @@ gst_input_selector_wait_running_time (GstInputSelector * sel,
+       GST_INPUT_SELECTOR_UNLOCK (sel);
+       break;
+     }
++#endif
+   }
+ 
+   /* Return TRUE if the selector or the pad is flushing */
+@@ -884,6 +1068,10 @@ gst_input_selector_cleanup_old_cached_buffers (GstInputSelector * sel,
+   GList *walk;
+ 
+   cur_running_time = GST_CLOCK_TIME_NONE;
++
++#ifdef TCL_PATCH
++  if (sel->is_subtitle == FALSE && sel->is_audio == FALSE) {
++#endif
+   if (sel->sync_mode == GST_INPUT_SELECTOR_SYNC_MODE_CLOCK) {
+     clock = gst_element_get_clock (GST_ELEMENT_CAST (sel));
+     if (clock) {
+@@ -913,6 +1101,11 @@ gst_input_selector_cleanup_old_cached_buffers (GstInputSelector * sel,
+           GST_FORMAT_TIME, active_seg->position);
+   }
+ 
++#ifdef TCL_PATCH
++  } else {
++    cur_running_time    = sel->decoder_pts;
++  }
++#endif
+   if (!GST_CLOCK_TIME_IS_VALID (cur_running_time))
+     return;
+ 
+@@ -939,7 +1132,11 @@ gst_input_selector_cleanup_old_cached_buffers (GstInputSelector * sel,
+       GSList *l;
+ 
+       /* If we have no valid timestamp we can't sync this buffer */
++#ifdef TCL_PATCH
++      if (buffer == NULL || !GST_BUFFER_PTS_IS_VALID(buffer)) {
++#else
+       if (!GST_BUFFER_PTS_IS_VALID (buffer)) {
++#endif
+         maybe_remove = g_slist_append (maybe_remove, cached_buffer);
+         queue_position = g_slist_length (maybe_remove);
+         continue;
+@@ -948,14 +1145,25 @@ gst_input_selector_cleanup_old_cached_buffers (GstInputSelector * sel,
+       /* the buffer is still valid if its duration is valid and the
+        * timestamp + duration is >= time, or if its duration is invalid
+        * and the timestamp is >= time */
+-      running_time = gst_input_selector_get_clipped_running_time (seg, buffer);
++#ifdef TCL_PATCH
++      if (sel->is_subtitle || sel->is_audio)
++        running_time = GST_BUFFER_PTS (buffer);
++      else
++#endif
++        running_time = gst_input_selector_get_clipped_running_time (seg, buffer);
+       GST_DEBUG_OBJECT (selpad,
+           "checking if buffer %p running time=%" GST_TIME_FORMAT
+           " >= stream time=%" GST_TIME_FORMAT, buffer,
+           GST_TIME_ARGS (running_time), GST_TIME_ARGS (cur_running_time));
++#ifdef TCL_PATCH
++      if (GST_CLOCK_TIME_IS_VALID(running_time) && running_time >= cur_running_time) {
++        break;
++      }
++#else
+       if (running_time >= cur_running_time) {
+         break;
+       }
++#endif
+ 
+       GST_DEBUG_OBJECT (selpad, "Removing old cached buffer %p", buffer);
+       g_queue_pop_nth (selpad->cached_buffers, queue_position);
+@@ -992,11 +1200,11 @@ gst_input_selector_cleanup_old_cached_buffers (GstInputSelector * sel,
+ static GstFlowReturn
+ gst_selector_pad_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
+ {
+-  GstInputSelector *sel;
++  GstInputSelector *sel;                            // InputSelector插件
+   GstFlowReturn res;
+-  GstPad *active_sinkpad;
+-  GstPad *prev_active_sinkpad = NULL;
+-  GstSelectorPad *selpad;
++  GstPad *active_sinkpad;                           // 当前激活的SinkPad
++  GstPad *prev_active_sinkpad = NULL;               // 之前激活的SinkPad
++  GstSelectorPad *selpad;                           // 当前pad
+ 
+   sel = GST_INPUT_SELECTOR (parent);
+   selpad = GST_SELECTOR_PAD_CAST (pad);
+@@ -1007,6 +1215,7 @@ gst_selector_pad_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
+ 
+   GST_INPUT_SELECTOR_LOCK (sel);
+ 
++  // 整个插件处于Flushing时
+   if (sel->flushing) {
+     GST_INPUT_SELECTOR_UNLOCK (sel);
+     goto flushing;
+@@ -1014,33 +1223,56 @@ gst_selector_pad_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
+ 
+   GST_LOG_OBJECT (pad, "getting active pad");
+ 
++  // 获取上一激活的SinkPad
+   prev_active_sinkpad =
+       sel->active_sinkpad ? gst_object_ref (sel->active_sinkpad) : NULL;
++  // 获取当前激活的SinkPad
+   active_sinkpad = gst_input_selector_get_active_sinkpad (sel);
+ 
+   /* In sync mode wait until the active pad has advanced
+    * after the running time of the current buffer */
++   // 只有字幕才做同步
+   if (sel->sync_streams) {
+     /* call chain for each cached buffer if we are not the active pad
+      * or if we are the active pad but didn't push anything yet. */
++    /* 1. 当前是激活的SinkPad, 且处于非push状态，则缓存数据
++    * 2. 当前是非激活的SinkPad，则全部缓存
++    */
+     if (active_sinkpad != pad || !selpad->pushed) {
+       /* no need to check for sel->cache_buffers as selpad->cached_buffers
+        * will only be valid if cache_buffers is TRUE */
++            // 如果存在缓存Buffer,且不处于正在推送缓存Buffer时,则将缓存的Buffer进行重新推送
+       if (selpad->cached_buffers && !selpad->sending_cached_buffers) {
++        // 置控制位
+         GstSelectorPadCachedBuffer *cached_buffer;
+         GstSegment saved_segment;
+ 
+         saved_segment = selpad->segment;
+ 
+         selpad->sending_cached_buffers = TRUE;
++#ifdef TCL_PATCH
++        cached_buffer                   = NULL;
++        if ((!sel->eos || (sel->is_audio && selpad->pthread_eos == FALSE)) && !sel->flushing && !selpad->flushing &&
++            (cached_buffer = g_queue_peek_head (selpad->cached_buffers))) {
++          g_queue_push_tail(selpad->cached_buffers, NULL);
++        }
++        if (sel->is_audio)
++          selpad->switchtimes = sel->switchtimes;
++        while ((!sel->eos || (sel->is_audio && selpad->pthread_eos == FALSE)) && !sel->flushing && !selpad->flushing &&
++            (cached_buffer = g_queue_pop_head (selpad->cached_buffers))) {
++#else
++        // 在非结束情况下，遍历推送缓存Buffer
+         while (!sel->eos && !sel->flushing && !selpad->flushing &&
+             (cached_buffer = g_queue_pop_head (selpad->cached_buffers))) {
++#endif
+           GST_DEBUG_OBJECT (pad, "Cached buffers found, "
+               "invoking chain for cached buffer %p", cached_buffer->buffer);
++          active_sinkpad = gst_input_selector_get_active_sinkpad (sel);
+ 
+           selpad->segment = cached_buffer->segment;
+           selpad->events_pending = TRUE;
+           GST_INPUT_SELECTOR_UNLOCK (sel);
++          // 推送缓存Buffer
+           gst_selector_pad_chain (pad, parent, cached_buffer->buffer);
+           GST_INPUT_SELECTOR_LOCK (sel);
+ 
+@@ -1050,13 +1282,19 @@ gst_selector_pad_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
+ 
+           /* we may have cleaned up the queue in the meantime because of
+            * old buffers */
++          /* 可能因为Cleanup old Buffer引起缓存Buffer队列被清空 */
+           if (!selpad->cached_buffers) {
+             break;
+           }
+         }
++        // 退出循环
+         selpad->sending_cached_buffers = FALSE;
+ 
++        //cache循环结束，即将处理chain函数自己的这一帧，即来自demux的。
++        selpad->cached_exit =TRUE;
++
+         /* all cached buffers sent, restore segment for current buffer */
++        /* 还原所有设置 */
+         selpad->segment = saved_segment;
+         selpad->events_pending = TRUE;
+ 
+@@ -1065,10 +1303,20 @@ gst_selector_pad_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
+       }
+     }
+ 
++    // 对于非激活的SinkPad,则考虑等待同步，避免超前
+     if (active_sinkpad != pad) {
+       GST_INPUT_SELECTOR_UNLOCK (sel);
++
++#ifdef TCL_PATCH
++      if (GST_BUFFER_PTS_IS_VALID (buf) && GST_BUFFER_PTS (buf) > 0) {
++        gboolean wait_flag = gst_input_selector_wait_running_time (sel, selpad, buf);
++        if (wait_flag)
++          goto flushing;
++      }
++#else
+       if (gst_input_selector_wait_running_time (sel, selpad, buf))
+         goto flushing;
++#endif
+       GST_INPUT_SELECTOR_LOCK (sel);
+     }
+ 
+@@ -1076,6 +1324,7 @@ gst_selector_pad_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
+     active_sinkpad = gst_input_selector_get_active_sinkpad (sel);
+   }
+ 
++  // 更新每个SinkPad记录的Segment位置
+   /* update the segment on the srcpad */
+   if (GST_BUFFER_PTS_IS_VALID (buf)) {
+     GstClockTime start_time = GST_BUFFER_PTS (buf);
+@@ -1091,17 +1340,24 @@ gst_selector_pad_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
+     GST_OBJECT_UNLOCK (pad);
+   }
+ 
++  // 对于非激活SinkPad则丢弃buffer
+   /* Ignore buffers from pads except the selected one */
+   if (pad != active_sinkpad)
+     goto ignore;
+ 
+   /* Tell all non-active pads that we advanced the running time */
++  // 对于字幕InputSelector,进行广播
+   if (sel->sync_streams)
+     GST_INPUT_SELECTOR_BROADCAST (sel);
+ 
+   GST_INPUT_SELECTOR_UNLOCK (sel);
+ 
++  // 当激活的SinkPad发生改变时，需要发送消息通知其他插件
++#ifdef TCL_PATCH
++  if (prev_active_sinkpad != active_sinkpad || (sel->is_audio && selpad->eos && sel->is_update_caps)) {
++#else
+   if (prev_active_sinkpad != active_sinkpad) {
++#endif
+     if (prev_active_sinkpad)
+       g_object_notify (G_OBJECT (prev_active_sinkpad), "active");
+     g_object_notify (G_OBJECT (active_sinkpad), "active");
+@@ -1109,8 +1365,17 @@ gst_selector_pad_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
+   }
+ 
+   /* if we have a pending events, push them now */
++#ifdef TCL_PATCH
++  if (G_UNLIKELY (prev_active_sinkpad != active_sinkpad
++          || selpad->events_pending) &&
++          ((sel->is_audio && sel->is_update_caps && selpad->eos) || // 已经eos的音轨在第一次推送数据需要去发送flush消息
++          (!sel->is_audio || (!selpad->eos || selpad->sending_cached_buffers == FALSE))) && // 已经eos的音轨在推送完数据时需要去发送eos消息
++          ((!sel->is_audio ||(sel->is_audio && !selpad->sending_cached_buffers && !selpad->cached_exit)) ||
++          selpad->switchtimes == sel->switchtimes)) { // 复制下面推送数据时的条件，下面要推数据，上面才发消息
++#else
+   if (G_UNLIKELY (prev_active_sinkpad != active_sinkpad
+           || selpad->events_pending)) {
++#endif
+     gst_pad_sticky_events_foreach (GST_PAD_CAST (selpad), forward_sticky_events,
+         sel);
+     selpad->events_pending = FALSE;
+@@ -1133,14 +1398,68 @@ gst_selector_pad_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
+   GST_LOG_OBJECT (pad, "Forwarding buffer %p with timestamp %" GST_TIME_FORMAT,
+       buf, GST_TIME_ARGS (GST_BUFFER_PTS (buf)));
+ 
++#ifdef TCL_PATCH
++//如果是audio，cache循环内的帧以及循环刚结束的当前帧不可直接push下去，否则可能会引起pts跳变
++  if (!sel->is_audio ||(sel->is_audio && !selpad->sending_cached_buffers && !selpad->cached_exit )) {
++      if (sel->is_update_caps == TRUE) {
++        GST_BUFFER_FLAG_SET (buf, GST_BUFFER_FLAG_DROPPABLE);
++        sel->is_update_caps = FALSE;
++      }
++      res = gst_pad_push (sel->srcpad, gst_buffer_ref(buf));
++  } else {
++      //相等，说明cache循环过程未被切走，可直接push
++      if (selpad->switchtimes == sel->switchtimes) {
++          if (sel->is_update_caps == TRUE) {
++            GST_BUFFER_FLAG_SET (buf, GST_BUFFER_FLAG_DROPPABLE);
++            sel->is_update_caps = FALSE;
++          }
++          res = gst_pad_push (sel->srcpad, gst_buffer_ref(buf));
++      } else if (sel->sync_streams && sel->cache_buffers) {
++      //不等，中途被切走过。剩余数据不推送并重新塞回cache，完成排序，等到下一次chain函数再依次推送cache中的数据
++    //      buf = gst_buffer_ref (buf);
++        if (selpad->cached_exit) {
++            selpad->cached_exit = FALSE;
++        }
++        res = GST_FLOW_OK;
++      }
++
++    }
++
++#else
+   /* Only make the buffer read-only when necessary */
+   if (sel->sync_streams && sel->cache_buffers)
+     buf = gst_buffer_ref (buf);
+   res = gst_pad_push (sel->srcpad, buf);
++#endif
++
+   GST_LOG_OBJECT (pad, "Buffer %p forwarded result=%d", buf, res);
+ 
+   GST_INPUT_SELECTOR_LOCK (sel);
+ 
++#ifdef TCL_PATCH
++  // 需要缓存Buffer时
++  if (sel->sync_streams && sel->cache_buffers) {
++    /* 对于单pad没必要Cache */
++    if (sel->n_pads > 1) {
++      /* Might have changed while pushing */
++      active_sinkpad = gst_input_selector_get_active_sinkpad (sel);
++      /* only set pad to pushed if we are still the active pad */
++      if (active_sinkpad == pad)
++          if (!sel->is_audio || selpad->switchtimes == sel->switchtimes)
++              selpad->pushed = TRUE;
++
++      /* 缓存Buffer并清理过时的数据 */
++      gst_selector_pad_cache_buffer (selpad, buf);
++      gst_input_selector_cleanup_old_cached_buffers (sel, pad);
++    } else {
++      selpad->pushed = TRUE;
++      gst_buffer_unref (buf);
++    }
++  } else {
++    selpad->pushed = TRUE;
++    gst_buffer_unref (buf);
++  }
++#else
+   if (sel->sync_streams && sel->cache_buffers) {
+     /* Might have changed while pushing */
+     active_sinkpad = gst_input_selector_get_active_sinkpad (sel);
+@@ -1154,6 +1473,7 @@ gst_selector_pad_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
+   } else {
+     selpad->pushed = TRUE;
+   }
++#endif
+   GST_INPUT_SELECTOR_UNLOCK (sel);
+ 
+ done:
+@@ -1181,6 +1501,11 @@ ignore:
+       res = GST_FLOW_OK;
+     else
+       res = GST_FLOW_NOT_LINKED;
++
++#ifdef TCL_PATCH
++    res = GST_FLOW_OK;
++#endif
++
+     GST_OBJECT_UNLOCK (selpad);
+ 
+     goto done;
+@@ -1300,6 +1625,35 @@ gst_input_selector_class_init (GstInputSelectorClass * klass)
+           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
+           GST_PARAM_MUTABLE_READY));
+ 
++#ifdef TCL_PATCH
++  g_object_class_install_property (gobject_class, PROP_IS_SUBTITLE,
++      g_param_spec_boolean ("is-subtitle", "subtitle flag",
++          "subtitle while sync stream by fpp pts",
++          DEFAULT_IS_SUBTITLE,
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
++          GST_PARAM_MUTABLE_READY));
++
++  g_object_class_install_property (gobject_class, PROP_IS_AUDIO,
++      g_param_spec_boolean ("is-audio", "audio flag",
++          "audio while sync stream by fpp pts",
++          DEFAULT_IS_AUDIO,
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
++          GST_PARAM_MUTABLE_READY));
++  g_object_class_install_property (gobject_class, PROP_IS_VIDEO,
++    g_param_spec_boolean ("is-video", "video flag",
++        "video while sync stream by fpp pts",
++        DEFAULT_IS_VIDEO,
++        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
++        GST_PARAM_MUTABLE_READY));
++
++  g_object_class_install_property (gobject_class, PROP_DECODER_PTS,
++    g_param_spec_int64 ( "decoder-current-pts",
++                      " decoder current pts ",
++                      "Current pts of decoder",
++                      0, G_MAXINT64,  0,
++                      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++#endif
++
+   gst_element_class_set_static_metadata (gstelement_class, "Input selector",
+       "Generic", "N-to-1 input stream selector",
+       "Julien Moutte <julien@moutte.net>, "
+@@ -1337,6 +1691,14 @@ gst_input_selector_init (GstInputSelector * sel)
+   sel->sync_mode = DEFAULT_SYNC_MODE;
+   sel->have_group_id = TRUE;
+ 
++#ifdef TCL_PATCH
++  sel->decoder_pts        = 0;                  // 不能使用GST_CLOCK_TIME_NONE;转换为clock后为无穷大，导致无法做同步
++  sel->is_subtitle    = DEFAULT_IS_SUBTITLE;
++  sel->is_audio       = DEFAULT_IS_AUDIO;
++  sel->is_video       = DEFAULT_IS_VIDEO;
++  sel->is_update_caps = FALSE;
++  sel->switchtimes = 0;
++#endif
+   g_mutex_init (&sel->lock);
+   g_cond_init (&sel->cond);
+   sel->eos = FALSE;
+@@ -1371,6 +1733,28 @@ gst_input_selector_finalize (GObject * object)
+   G_OBJECT_CLASS (parent_class)->finalize (object);
+ }
+ 
++
++static void *push_cache_thread_func(void* param)
++{
++    GstObject *self = (GstObject *)param;
++    GstBuffer* new_buffer = NULL;
++    guint8 data[2];
++    GST_INPUT_SELECTOR_LOCK(self);
++    memset(data,0, 2);
++    new_buffer = gst_buffer_new_and_alloc(2);
++    gst_buffer_fill(new_buffer, 0, data, 2);
++    new_buffer->pts       = 0;
++    new_buffer->duration  = 0;
++    new_buffer->dts       = 0;
++    gst_buffer_set_size(new_buffer, 2);
++    GST_BUFFER_FLAG_SET(new_buffer, GST_BUFFER_FLAG_DROPPABLE);
++    GST_SELECTOR_PAD_CAST(GST_INPUT_SELECTOR(self)->active_sinkpad)->pushed = FALSE;
++    GST_INPUT_SELECTOR_UNLOCK(self);
++    gst_selector_pad_chain(GST_INPUT_SELECTOR(self)->active_sinkpad, self, new_buffer);
++
++}
++
++
+ /* this function must be called with the SELECTOR_LOCK. It returns TRUE when the
+  * active pad changed. */
+ static gboolean
+@@ -1416,10 +1800,62 @@ gst_input_selector_set_active_pad (GstInputSelector * self, GstPad * pad)
+   GST_DEBUG_OBJECT (self, "New active pad is %" GST_PTR_FORMAT,
+       self->active_sinkpad);
+ 
++#ifdef TCL_PATCH
++  if (self->is_audio) {
++      self->switchtimes++;
++      GST_ERROR("Dummy switchtimes = %d", self->switchtimes);
++  }
++  if (old != new && new) {
++    if(new->eos){
++      self->is_update_caps = TRUE;
++      new->eos_sent = FALSE;
++      GST_INPUT_SELECTOR_BROADCAST (self);
++      // pthread_eos保证同一时刻只有一个chain线程在运行，上一次创建的没结束，这次过来就不创建新的chain线程
++      if (self->is_audio && new->pthread_eos) {
++        pthread_t push_cache_thread = -1;
++        new->pthread_eos = FALSE;
++        push_cache_thread = pthread_create(&push_cache_thread, NULL, (void *)push_cache_thread_func, GST_OBJECT_CAST(self));
++        if(-1 == push_cache_thread) {
++            GST_ERROR("push_cache_thread thread created failed");
++        } else {
++            pthread_detach(push_cache_thread);
++            GST_ERROR("push_cache_thread thread created success!");
++        }
++        usleep(50*1000);
++      }
++    }
++    else if(self->is_subtitle)
++    {
++      /* 当字幕切换时，由于同步+缓存机制，导致只有在原激活的那路调用一次chain函数才有可能检测到新激活，
++        * 因为其他非激活Pad由于处于同步状态进入了等待状态，不可能检测到。而原激活的那路字幕，因为推送太快，
++        * 只有在下一次(未知)推送时才能进入chain函数，并检测新激活Pad，
++        * 此时只需在推送一个假数据，给任一路，均可破开。
++        */
++        pthread_t push_cache_thread = -1;
++        push_cache_thread = pthread_create(&push_cache_thread, NULL, (void *)push_cache_thread_func, GST_OBJECT_CAST(self));
++        if(-1 == push_cache_thread) {
++            GST_ERROR("push_cache_thread thread created failed");
++        } else {
++            pthread_detach(push_cache_thread);
++            GST_ERROR("push_cache_thread thread created success!");
++        }
++        usleep(100*1000);
++
++      /* 没必要去释放该buffer，因为该buffer因为PTS未0，推送给下字幕插件会被淘汰掉，
++       * Chain函数放入缓存也会被当做old buffer给清理掉。
++       */
++    }
++    else
++    {
++      self->is_update_caps = TRUE;
++    }
++  }
++#else
+   if (old != new && new && new->eos) {
+     new->eos_sent = FALSE;
+     GST_INPUT_SELECTOR_BROADCAST (self);
+   }
++#endif
+ 
+   return TRUE;
+ }
+@@ -1468,6 +1904,56 @@ gst_input_selector_set_property (GObject * object, guint prop_id,
+       sel->cache_buffers = g_value_get_boolean (value);
+       GST_INPUT_SELECTOR_UNLOCK (object);
+       break;
++
++#ifdef TCL_PATCH
++    case PROP_IS_SUBTITLE:
++      GST_INPUT_SELECTOR_LOCK (object);
++      sel->is_subtitle  = g_value_get_boolean (value);
++      GST_INPUT_SELECTOR_UNLOCK (object);
++      break;
++    case PROP_IS_AUDIO:
++      GST_INPUT_SELECTOR_LOCK (object);
++      sel->is_audio  = g_value_get_boolean (value);
++      GST_INPUT_SELECTOR_UNLOCK (object);
++      break;
++   case PROP_IS_VIDEO:
++      GST_INPUT_SELECTOR_LOCK (object);
++      sel->is_video  = g_value_get_boolean (value);
++      GST_INPUT_SELECTOR_UNLOCK (object);
++   case PROP_DECODER_PTS:
++      GST_INPUT_SELECTOR_LOCK (object);
++      gint64 tempPts = g_value_get_int64 (value) * 1000 * 1000;
++      if(tempPts > sel->decoder_pts) {
++        sel->decoder_pts = (GstClockTime)tempPts;
++
++        GList *walk = NULL;
++        int need_send_broadcast = 0;
++
++        for (walk = GST_ELEMENT_CAST (sel)->sinkpads; walk; walk = g_list_next (walk)) {
++          GstSelectorPad *selpad = GST_SELECTOR_PAD_CAST (walk->data);
++
++          if ((selpad == (GstSelectorPad *)sel->active_sinkpad) ||
++            (GST_CLOCK_TIME_NONE == selpad->cur_waitting_time)) {
++            continue;
++          }
++          //GST_WARNING_OBJECT(sel, "sel->cur_waitting_time = %" GST_TIME_FORMAT,GST_TIME_ARGS(selpad->cur_waitting_time));
++          //GST_WARNING_OBJECT(sel, "sel->decoder_pts %" GST_TIME_FORMAT, GST_TIME_ARGS(sel->decoder_pts));
++          if (sel->decoder_pts > selpad->cur_waitting_time) {
++            //GST_WARNING_OBJECT(sel,"need send broadcast msg to\n");
++            need_send_broadcast = 1;
++            continue;
++          } else {
++            break;
++          }
++        }
++
++        if (walk == NULL && need_send_broadcast) {
++          GST_INPUT_SELECTOR_BROADCAST (sel);
++        }
++      }
++      GST_INPUT_SELECTOR_UNLOCK (object);
++      break;
++#endif
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+       break;
+@@ -1516,6 +2002,25 @@ gst_input_selector_get_property (GObject * object, guint prop_id,
+       g_value_set_boolean (value, sel->cache_buffers);
+       GST_INPUT_SELECTOR_UNLOCK (object);
+       break;
++#ifdef TCL_PATCH
++    case PROP_IS_SUBTITLE:
++      GST_INPUT_SELECTOR_LOCK (object);
++      g_value_set_boolean (value, sel->is_subtitle);
++      GST_INPUT_SELECTOR_UNLOCK (object);
++      break;
++    case PROP_IS_AUDIO:
++      GST_INPUT_SELECTOR_LOCK (object);
++      g_value_set_boolean (value, sel->is_audio);
++      GST_INPUT_SELECTOR_UNLOCK (object);
++      break;
++   case PROP_IS_VIDEO:
++      GST_INPUT_SELECTOR_LOCK (object);
++      g_value_set_boolean (value, sel->is_video);
++      GST_INPUT_SELECTOR_UNLOCK (object);
++      break;
++   case PROP_DECODER_PTS:
++      break;
++#endif
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+       break;
+@@ -1552,6 +2057,56 @@ gst_input_selector_event (GstPad * pad, GstObject * parent, GstEvent * event)
+   GList *pushed_pads = NULL;
+ 
+   sel = GST_INPUT_SELECTOR (parent);
++#ifdef TCL_PATCH
++  GList *walk           = NULL;
++  // 特别处理来自字幕插件的自定义消息，
++  if (GST_EVENT_TYPE(event) == GST_EVENT_CUSTOM_UPSTREAM) {
++    // 获取PTS
++    if (gst_event_has_name (event, "custom_event_pts")) {
++      const GstStructure* st  = gst_event_get_structure(event);
++      guint64       PTS       = -1;
++      PTS = g_value_get_uint64(gst_structure_get_value(st, "PTS"));
++      if (PTS >= 0) {
++        GST_INPUT_SELECTOR_LOCK (sel);
++        // 记录PTS
++        sel->decoder_pts = (GstClockTime)PTS;
++        int need_send_broadcast = 0;
++
++        for (walk = GST_ELEMENT_CAST (sel)->sinkpads; walk; walk = g_list_next (walk)) {
++          GstSelectorPad *selpad = GST_SELECTOR_PAD_CAST (walk->data);
++
++          if ((selpad == (GstSelectorPad *)sel->active_sinkpad) ||
++            (GST_CLOCK_TIME_NONE == selpad->cur_waitting_time)) {
++            continue;
++          }
++          //GST_INFO("(%p,%d,%d) sel->cur_waitting_time = %" GST_TIME_FORMAT, selpad, sel->sync_streams,sel->is_subtitle,GST_TIME_ARGS(selpad->cur_waitting_time));
++          //GST_INFO("\n");
++          if (sel->decoder_pts > selpad->cur_waitting_time) {
++            //GST_INFO("need send broadcast msg to %p\n",selpad);
++            need_send_broadcast = 1;
++            continue;
++          } else {
++            break;
++          }
++        }
++
++        if (walk == NULL && need_send_broadcast) {
++          //GST_INFO("########################################################################\n");
++          //GST_INFO("fpp_pts update222 = %" GST_TIME_FORMAT, GST_TIME_ARGS(sel->fpp_decoder));
++          //GST_INFO("\n");
++          //GST_INFO("need send broadcast msg \n");
++          //GST_INFO("########################################################################\n");
++          GST_INPUT_SELECTOR_BROADCAST (sel);
++        }
++        GST_INPUT_SELECTOR_UNLOCK (sel);
++      }
++    }
++    // 消息不继续传输
++    gst_event_unref(event);
++    return TRUE;
++  }
++#endif
++   // 遍历所有的SinkPad,将event传给每一个SinkPad
+   /* Send upstream events to all sinkpads */
+   iter = gst_element_iterate_sink_pads (GST_ELEMENT_CAST (sel));
+ 
+diff --git a/subprojects/gstreamer/plugins/elements/gstinputselector.h b/subprojects/gstreamer/plugins/elements/gstinputselector.h
+index 9d2eb6aa5c..08717c36c0 100644
+--- a/subprojects/gstreamer/plugins/elements/gstinputselector.h
++++ b/subprojects/gstreamer/plugins/elements/gstinputselector.h
+@@ -18,7 +18,7 @@
+  * Free Software Foundation, Inc., 51 Franklin St, Fifth Floor,
+  * Boston, MA 02110-1301, USA.
+  */
+- 
++
+ #ifndef __GST_INPUT_SELECTOR_H__
+ #define __GST_INPUT_SELECTOR_H__
+ 
+@@ -80,6 +80,14 @@ struct _GstInputSelector {
+   gboolean eos;
+   gboolean eos_sent;
+   gboolean flushing;
++#ifdef TCL_PATCH
++  gboolean  is_subtitle;
++  gboolean  is_audio;
++  gboolean  is_video;
++  gboolean  is_update_caps;
++  GstClockTime  decoder_pts;
++  int switchtimes;
++#endif
+ };
+ 
+ struct _GstInputSelectorClass {
+diff --git a/subprojects/gstreamer/plugins/elements/gstqueue.c b/subprojects/gstreamer/plugins/elements/gstqueue.c
+index e381083a87..61c26fab6a 100644
+--- a/subprojects/gstreamer/plugins/elements/gstqueue.c
++++ b/subprojects/gstreamer/plugins/elements/gstqueue.c
+@@ -127,7 +127,11 @@ enum
+ 
+ /* default property values */
+ #define DEFAULT_MAX_SIZE_BUFFERS  200   /* 200 buffers */
++#ifdef TCL_PATCH
++#define DEFAULT_MAX_SIZE_BYTES    (5 * 1024 * 1024)    /* 5 MB       */
++#else
+ #define DEFAULT_MAX_SIZE_BYTES    (10 * 1024 * 1024)    /* 10 MB       */
++#endif
+ #define DEFAULT_MAX_SIZE_TIME     GST_SECOND    /* 1 second    */
+ 
+ #define GST_QUEUE_MUTEX_LOCK(q) G_STMT_START {                          \
+@@ -477,7 +481,9 @@ gst_queue_init (GstQueue * queue)
+   queue->src_tainted = TRUE;
+ 
+   queue->newseg_applied_to_src = FALSE;
+-
++#ifdef TCL_PATCH
++  queue->send_streamstart_event = FALSE;
++#endif
+   GST_DEBUG_OBJECT (queue,
+       "initialized queue's not_empty & not_full conditions");
+ }
+@@ -918,6 +924,15 @@ gst_queue_handle_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
+   GST_CAT_LOG_OBJECT (queue_dataflow, queue, "Received event '%s'",
+       GST_EVENT_TYPE_NAME (event));
+ 
++#ifdef TCL_PATCH
++if (GST_EVENT_TYPE (event) == GST_EVENT_CAPS &&
++    queue->send_streamstart_event == TRUE) {
++    ret = gst_pad_push_event (queue->srcpad, event);
++    if (ret == FALSE)
++      return GST_FLOW_ERROR;
++    return GST_FLOW_OK;
++  }
++#endif
+   switch (GST_EVENT_TYPE (event)) {
+     case GST_EVENT_FLUSH_START:
+       /* forward event */
+@@ -925,6 +940,9 @@ gst_queue_handle_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
+ 
+       /* now unblock the chain function */
+       GST_QUEUE_MUTEX_LOCK (queue);
++#ifdef TCL_PATCH
++      gst_queue_locked_flush (queue, FALSE);
++#endif
+       queue->srcresult = GST_FLOW_FLUSHING;
+       /* unblock the loop and chain functions */
+       GST_QUEUE_SIGNAL_ADD (queue);
+@@ -1453,7 +1471,10 @@ next:
+   } else if (GST_IS_EVENT (data)) {
+     GstEvent *event = GST_EVENT_CAST (data);
+     GstEventType type = GST_EVENT_TYPE (event);
+-
++#ifdef TCL_PATCH
++    if(type == GST_EVENT_STREAM_START)
++        queue->send_streamstart_event = TRUE;
++#endif
+     GST_QUEUE_MUTEX_UNLOCK (queue);
+ 
+     gst_pad_push_event (queue->srcpad, event);
+diff --git a/subprojects/gstreamer/plugins/elements/gstqueue.h b/subprojects/gstreamer/plugins/elements/gstqueue.h
+index 2a9cb3612a..f89c0d252f 100644
+--- a/subprojects/gstreamer/plugins/elements/gstqueue.h
++++ b/subprojects/gstreamer/plugins/elements/gstqueue.h
+@@ -138,6 +138,10 @@ struct _GstQueue {
+   GstQuery *last_handled_query;
+ 
+   gboolean flush_on_eos; /* flush on EOS */
++
++#ifdef TCL_PATCH
++  gboolean send_streamstart_event;
++#endif
+ };
+ 
+ struct _GstQueueClass {
+diff --git a/subprojects/gstreamer/plugins/elements/gsttypefindelement.c b/subprojects/gstreamer/plugins/elements/gsttypefindelement.c
+index 41dedb27fe..4cc1c8ebb4 100644
+--- a/subprojects/gstreamer/plugins/elements/gsttypefindelement.c
++++ b/subprojects/gstreamer/plugins/elements/gsttypefindelement.c
+@@ -111,6 +111,9 @@ enum
+ enum
+ {
+   PROP_0,
++#ifdef TCL_PATCH
++  PROP_BLOCK_NUM,
++#endif
+   PROP_CAPS,
+   PROP_MINIMUM,
+   PROP_FORCE_CAPS,
+@@ -236,6 +239,25 @@ gst_type_find_element_emit_have_type (GstTypeFindElement * typefind,
+   gst_pad_store_sticky_event (typefind->src, event);
+   gst_event_unref (event);
+ 
++#ifdef TCL_PATCH
++  if (!typefind->found_sub_tags) {
++    const GstStructure *structure = gst_caps_get_structure(caps,0);
++    const gchar *name = gst_structure_get_name(structure);
++
++    if (name && strstr(name, "application/ttml+xml")) {
++      const gchar *lang = gst_structure_get_string(structure, "language");
++      const gchar *codec = gst_structure_get_string(structure, "codec");
++
++      GstTagList *tags = gst_tag_list_new_empty();
++      gst_tag_list_add (tags, GST_TAG_MERGE_REPLACE, GST_TAG_SUBTITLE_CODEC, codec, NULL);
++      gst_tag_list_add (tags, GST_TAG_MERGE_REPLACE, GST_TAG_LANGUAGE_CODE, lang, NULL);
++      gst_pad_push_event (typefind->src, gst_event_new_tag (tags));
++
++      typefind->found_sub_tags = TRUE;
++    }
++  }
++#endif
++
+   g_signal_emit (typefind, gst_type_find_element_signals[HAVE_TYPE], 0,
+       probability, caps);
+ }
+@@ -263,6 +285,14 @@ gst_type_find_element_class_init (GstTypeFindElementClass * typefind_class)
+       g_param_spec_boxed ("force-caps", _("force caps"),
+           _("force caps without doing a typefind"), GST_TYPE_CAPS,
+           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++#ifdef TCL_PATCH
++  g_object_class_install_property (gobject_class, PROP_BLOCK_NUM,
++      g_param_spec_int ("block-num", "block num",
++          "block num", 1, 8192, 1,
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS ));
++#endif
++
+   /**
+    * GstTypeFindElement::have-type:
+    * @typefind: the typefind instance
+@@ -332,7 +362,10 @@ gst_type_find_element_init (GstTypeFindElement * typefind)
+   typefind->mode = MODE_TYPEFIND;
+   typefind->caps = NULL;
+   typefind->min_probability = 1;
+-
++#ifdef TCL_PATCH
++  typefind->found_sub_tags = FALSE;
++  typefind->block_num = 1;
++#endif
+   typefind->adapter = gst_adapter_new ();
+ }
+ 
+@@ -364,6 +397,15 @@ gst_type_find_element_set_property (GObject * object, guint prop_id,
+       gst_caps_take (&typefind->force_caps, g_value_dup_boxed (value));
+       GST_OBJECT_UNLOCK (typefind);
+       break;
++#ifdef TCL_PATCH
++    case PROP_BLOCK_NUM:
++    {
++      gint num = g_value_get_int (value);
++      GST_DEBUG("set PROP_BLOCK_NUM = %d", num);
++      typefind->block_num = num;
++      break;
++    }
++#endif
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+       break;
+@@ -392,6 +434,13 @@ gst_type_find_element_get_property (GObject * object, guint prop_id,
+       g_value_set_boxed (value, typefind->force_caps);
+       GST_OBJECT_UNLOCK (typefind);
+       break;
++#ifdef TCL_PATCH
++    case PROP_BLOCK_NUM:
++    {
++        g_value_set_int (value, typefind->block_num);
++        break;
++    }
++#endif
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+       break;
+@@ -917,6 +966,24 @@ gst_type_find_element_chain (GstPad * pad, GstObject * parent,
+       return GST_FLOW_ERROR;
+     case MODE_NORMAL:
+       /* don't take object lock as typefind->caps should not change anymore */
++#ifdef TCL_PATCH
++    if (!typefind->found_sub_tags) {
++      const GstStructure *structure = gst_caps_get_structure(typefind->caps,0);
++      const gchar *name = gst_structure_get_name(structure);
++
++      if (name && strstr(name, "application/ttml+xml")) {
++        const gchar *lang = gst_structure_get_string(structure, "language");
++        const gchar *codec = gst_structure_get_string(structure, "codec");
++
++        GstTagList *tags = gst_tag_list_new_empty();
++        gst_tag_list_add (tags, GST_TAG_MERGE_REPLACE, GST_TAG_SUBTITLE_CODEC, codec, NULL);
++        gst_tag_list_add (tags, GST_TAG_MERGE_REPLACE, GST_TAG_LANGUAGE_CODE, lang, NULL);
++        gst_pad_push_event (typefind->src, gst_event_new_tag (tags));
++
++        typefind->found_sub_tags = TRUE;
++        }
++    }
++#endif
+       return gst_pad_push (typefind->src, buffer);
+     case MODE_TYPEFIND:
+     {
+@@ -1206,8 +1273,12 @@ gst_type_find_element_loop (GstPad * pad)
+       gst_pad_push_event (typefind->src, event);
+     }
+ 
++#ifdef TCL_PATCH
++    ret = gst_pad_pull_range (typefind->sink, typefind->offset, 4096 * typefind->block_num, &outbuf);
++#else
+     /* Pull 4k blocks and send downstream */
+     ret = gst_pad_pull_range (typefind->sink, typefind->offset, 4096, &outbuf);
++#endif
+     if (ret != GST_FLOW_OK)
+       goto pause;
+ 
+diff --git a/subprojects/gstreamer/plugins/elements/gsttypefindelement.h b/subprojects/gstreamer/plugins/elements/gsttypefindelement.h
+index b0af0d582c..8840e113c6 100644
+--- a/subprojects/gstreamer/plugins/elements/gsttypefindelement.h
++++ b/subprojects/gstreamer/plugins/elements/gsttypefindelement.h
+@@ -59,13 +59,18 @@ struct _GstTypeFindElement {
+   GstCaps *             force_caps;
+ 
+   guint64		initial_offset;
+-  
++
+   /* Only used when driving the pipeline */
+   gboolean need_segment;
+   gboolean need_stream_start;
+   GstSegment segment;
+   guint64 offset;
+   guint32 seqnum;
++
++#ifdef TCL_PATCH
++  gboolean found_sub_tags;
++  gint block_num;
++#endif
+ };
+ 
+ struct _GstTypeFindElementClass {
+-- 
+2.25.1
+

@@ -14,6 +14,9 @@ class Recipe(custom.GStreamer):
                      'x264': 'enabled'}
     deps = ['gstreamer-1.0', 'gst-plugins-base-1.0', 'a52dec', 'opencore-amr',
             'libdvdread', 'x264']
+    patches = [
+        name + '/0001-TCL-modifications-for-gst-plugins-ugly.patch',
+    ]
 
     files_plugins_codecs_restricted = [
              'lib/gstreamer-1.0/libgsta52dec%(mext)s',

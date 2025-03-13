@@ -79,6 +79,11 @@ class Recipe(custom.GStreamer):
             'soundtouch', 'vo-aacenc', 'librsvg', 'openjpeg',
             'pango', 'spandsp', 'webrtc-audio-processing', 'sbc', 'ladspa',
             'srt', 'zbar']
+
+    patches = [
+        name + '/0001-TCL-modifications-for-gst-plugins-bad.patch',
+    ]
+
     use_system_libs = True
 
     files_lang = ['gst-plugins-bad-1.0']

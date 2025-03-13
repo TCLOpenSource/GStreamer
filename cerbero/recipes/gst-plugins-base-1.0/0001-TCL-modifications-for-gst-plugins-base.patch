@@ -1,0 +1,4978 @@
+From 75239d35c7b6523fd3bd30ff3127a5c4c09ab80d Mon Sep 17 00:00:00 2001
+From: TCLCode <opensource@tcl.com>
+Date: Thu, 6 Mar 2025 11:30:17 +0800
+Subject: [PATCH] TCL modifications for gst-plugins-base
+
+---
+ .../gst-plugins-base/ext/gl/gstglimagesink.c  |    4 +
+ .../gst-plugins-base/ext/gl/meson.build       |    2 +-
+ .../gst-libs/gst/pbutils/codec-utils.c        |   19 +
+ .../gst-libs/gst/pbutils/descriptions.c       |   22 +
+ .../gst-libs/gst/riff/riff-ids.h              |    3 +
+ .../gst-libs/gst/riff/riff-media.c            |   73 +-
+ .../gst-libs/gst/tag/gsttagdemux.c            |    6 +-
+ .../gst/playback/gstdecodebin2.c              |   35 +
+ .../gst/playback/gstplaybin2.c                | 1448 ++++++++++++++++-
+ .../gst/playback/gstplaysink.c                |  684 +++++++-
+ .../gst/playback/gstplaysink.h                |   20 +
+ .../gst/playback/gstsubtitleoverlay.c         |  602 ++++++-
+ .../gst/playback/gstsubtitleoverlay.h         |   11 +
+ .../gst/playback/gsturidecodebin.c            |  155 +-
+ .../gst/playback/gsturisourcebin.c            |   13 +-
+ .../gst/typefind/gsttypefindfunctions.c       |  139 +-
+ .../gst/typefind/gsttypefindfunctionsplugin.c |    9 +
+ .../typefind/gsttypefindfunctionsstartwith.c  |    2 +
+ subprojects/gst-plugins-base/meson.build      |   12 +-
+ 19 files changed, 3166 insertions(+), 93 deletions(-)
+
+diff --git a/subprojects/gst-plugins-base/ext/gl/gstglimagesink.c b/subprojects/gst-plugins-base/ext/gl/gstglimagesink.c
+index 3e621bea2d..9afcac39d2 100644
+--- a/subprojects/gst-plugins-base/ext/gl/gstglimagesink.c
++++ b/subprojects/gst-plugins-base/ext/gl/gstglimagesink.c
+@@ -2268,6 +2268,10 @@ gst_glimage_sink_on_resize (GstGLImageSink * gl_sink, gint width, gint height)
+         src.h = GST_VIDEO_SINK_HEIGHT (gl_sink);
+       }
+ 
++      /* The stream may not be negotiated yet */
++      src.w = MAX (1, src.w);
++      src.h = MAX (1, src.h);
++
+       dst.x = 0;
+       dst.y = 0;
+       dst.w = width;
+diff --git a/subprojects/gst-plugins-base/ext/gl/meson.build b/subprojects/gst-plugins-base/ext/gl/meson.build
+index c0f20381af..29e83b64f3 100644
+--- a/subprojects/gst-plugins-base/ext/gl/meson.build
++++ b/subprojects/gst-plugins-base/ext/gl/meson.build
+@@ -78,7 +78,7 @@ if graphene_dep.found()
+ endif
+ 
+ png_dep = dependency('libpng', version : '>=1.0', required : get_option('gl-png'))
+-jpeg_dep = dependency('libjpeg', required : get_option('gl-jpeg'))
++jpeg_dep = dependency('libjpeg', required : get_option('gl-jpeg'), static: true)
+ 
+ if png_dep.found()
+   optional_deps += png_dep
+diff --git a/subprojects/gst-plugins-base/gst-libs/gst/pbutils/codec-utils.c b/subprojects/gst-plugins-base/gst-libs/gst/pbutils/codec-utils.c
+index 78bdb7a22d..8073ec506f 100644
+--- a/subprojects/gst-plugins-base/gst-libs/gst/pbutils/codec-utils.c
++++ b/subprojects/gst-plugins-base/gst-libs/gst/pbutils/codec-utils.c
+@@ -190,6 +190,9 @@ gst_codec_utils_aac_get_audio_object_type_full (GstBitReader * br,
+   if (!gst_bit_reader_get_bits_uint8 (br, &channels, 4))
+     return FALSE;
+ 
++#ifdef TCL_PATCH
++
++#elif
+   /* 5 indicates SBR extension (i.e. HE-AAC) */
+   /* 29 indicates PS extension */
+   if (aot == 5 || aot == 29) {
+@@ -198,6 +201,7 @@ gst_codec_utils_aac_get_audio_object_type_full (GstBitReader * br,
+     if (!gst_codec_utils_aac_get_audio_object_type (br, &aot))
+       return FALSE;
+   }
++#endif
+ 
+   *audio_object_type = aot;
+   *sample_rate = rate;
+@@ -311,6 +315,16 @@ gst_codec_utils_aac_get_profile (const guint8 * audio_config, guint len)
+     case 4:
+       profile = "ltp";
+       break;
++#ifdef TCL_PATCH
++    case 5:
++      //HEAAC v1
++      profile = "sbr";
++      break;
++    case 29:
++      //HEAAC v2
++      profile = "ps";
++      break;
++#endif
+     default:
+       GST_DEBUG ("Invalid profile idx: %u", audio_object_type);
+       break;
+@@ -820,7 +834,12 @@ gst_codec_utils_h264_caps_set_level_and_profile (GstCaps * caps,
+ 
+   g_return_val_if_fail (GST_IS_CAPS (caps), FALSE);
+   g_return_val_if_fail (GST_CAPS_IS_SIMPLE (caps), FALSE);
++
++#ifdef TCL_PATCH
++  g_return_val_if_fail (GST_SIMPLE_CAPS_HAS_NAME (caps, "video/x-h264") || GST_SIMPLE_CAPS_HAS_NAME (caps, "video/x-h264-tcl"), FALSE);
++#else
+   g_return_val_if_fail (GST_SIMPLE_CAPS_HAS_NAME (caps, "video/x-h264"), FALSE);
++#endif
+   g_return_val_if_fail (sps != NULL, FALSE);
+ 
+   level = gst_codec_utils_h264_get_level (sps, len);
+diff --git a/subprojects/gst-plugins-base/gst-libs/gst/pbutils/descriptions.c b/subprojects/gst-plugins-base/gst-libs/gst/pbutils/descriptions.c
+index abb751ed82..c52e6034bd 100644
+--- a/subprojects/gst-plugins-base/gst-libs/gst/pbutils/descriptions.c
++++ b/subprojects/gst-plugins-base/gst-libs/gst/pbutils/descriptions.c
+@@ -112,6 +112,13 @@ static const FormatInfo formats[] = {
+   {"audio/ac3", "AC-3 (ATSC A/52)", FLAG_AUDIO, "ac3"},
+   {"audio/x-private-ac3", "DVD AC-3 (ATSC A/52)", FLAG_AUDIO, "ac3"},
+   {"audio/x-private1-ac3", "DVD AC-3 (ATSC A/52)", FLAG_AUDIO, "ac3"},
++
++#ifdef TCL_PATCH
++  {"audio/x-ac4", "AC-4 (ATSC A/52)", FLAG_AUDIO, "ac4"},
++  {"audio/ac4", "AC-4 (ATSC A/52)", FLAG_AUDIO, "ac4"},
++  {"audio/x-private-ac4", "DVD AC-4 (ATSC A/52)", FLAG_AUDIO, "ac4"},
++  {"audio/x-private1-ac4", "DVD AC-4 (ATSC A/52)", FLAG_AUDIO, "ac4"},
++#endif
+   {"audio/x-alaw", "A-Law", FLAG_AUDIO, ""},
+   {"audio/amr", "Adaptive Multi Rate (AMR)", FLAG_AUDIO, "amr"},
+   {"audio/AMR", "Adaptive Multi Rate (AMR)", FLAG_AUDIO, "amr"},
+@@ -139,7 +146,12 @@ static const FormatInfo formats[] = {
+   {"audio/x-dts", "DTS", FLAG_AUDIO, "dts"},
+   {"audio/x-private1-dts", "DTS", FLAG_AUDIO, "dts"},
+   {"audio/x-dv", "DV Audio", FLAG_AUDIO, ""},
++
++#ifdef TCL_PATCH
++  {"audio/x-eac3", "E-AC3", FLAG_AUDIO, "eac3"},
++#else
+   {"audio/x-eac3", "E-AC-3 (ATSC A/52B)", FLAG_AUDIO, "eac3"},
++#endif
+   {"audio/x-flac", N_("Free Lossless Audio Codec (FLAC)"), FLAG_AUDIO, "flac"},
+   {"audio/x-gsm", "GSM", FLAG_AUDIO, "gsm"},
+   {"audio/x-iec958", "S/PDIF IEC958", 0, ""},   /* TODO: check description */
+@@ -283,7 +295,12 @@ static const FormatInfo formats[] = {
+   {"application/x-subtitle-sami", N_("Sami subtitle format"), FLAG_SUB, ""},
+   {"application/x-subtitle-tmplayer", N_("TMPlayer subtitle format"), FLAG_SUB,
+       ""},
++
++#ifdef TCL_PATCH
++  {"application/x-teletext", "Teletext", FLAG_SUB, ""},
++#else
+   {"application/x-teletext", "Teletext", 0, ""},
++#endif
+   {"application/x-kate", "Kate", 0, ""},
+   {"closedcaption/x-cea-608", N_("CEA 608 Closed Caption"), FLAG_SUB, ""},
+   {"closedcaption/x-cea-708", N_("CEA 708 Closed Caption"), FLAG_SUB, ""},
+@@ -749,7 +766,12 @@ format_info_get_desc (const FormatInfo * info, const GstCaps * caps)
+       case 2:
+         return g_strdup ("MPEG-2 AAC");
+       case 4:
++
++#ifdef TCL_PATCH
++        return g_strdup ("HEAAC");
++#else
+         return g_strdup ("MPEG-4 AAC");
++#endif
+       default:
+         break;
+     }
+diff --git a/subprojects/gst-plugins-base/gst-libs/gst/riff/riff-ids.h b/subprojects/gst-plugins-base/gst-libs/gst/riff/riff-ids.h
+index dce937e6ad..7f6e64b03a 100644
+--- a/subprojects/gst-plugins-base/gst-libs/gst/riff/riff-ids.h
++++ b/subprojects/gst-plugins-base/gst-libs/gst/riff/riff-ids.h
+@@ -448,6 +448,9 @@ typedef struct _gst_riff_strf_auds {       /* == WaveHeader (?) */
+ #define GST_RIFF_WAVE_FORMAT_SONIC          (0x2048)
+ #define GST_RIFF_WAVE_FORMAT_SONIC_LS       (0x2048)
+ #define GST_RIFF_WAVE_FORMAT_AAC_AC         (0x4143)
++#ifdef TCL_PATCH
++#define GST_RIFF_WAVE_FORMAT_VORBIS         (0x566f)
++#endif
+ #define GST_RIFF_WAVE_FORMAT_VORBIS1        (0x674f)
+ #define GST_RIFF_WAVE_FORMAT_VORBIS2        (0x6750)
+ #define GST_RIFF_WAVE_FORMAT_VORBIS3        (0x6751)
+diff --git a/subprojects/gst-plugins-base/gst-libs/gst/riff/riff-media.c b/subprojects/gst-plugins-base/gst-libs/gst/riff/riff-media.c
+index 21200a19bd..9b0252001c 100644
+--- a/subprojects/gst-plugins-base/gst-libs/gst/riff/riff-media.c
++++ b/subprojects/gst-plugins-base/gst-libs/gst/riff/riff-media.c
+@@ -597,6 +597,15 @@ gst_riff_create_video_caps (guint32 codec_fcc,
+         *codec_name = g_strdup ("Microsoft Windows Media Advanced Profile");
+       break;
+ 
++#ifdef TCL_PATCH
++    case GST_MAKE_FOURCC ('W', 'M', 'V', 'P'):
++      caps = gst_caps_new_simple ("video/x-wmv",
++          "wmvversion", G_TYPE_INT, 3, "format", G_TYPE_STRING, "WMVP", NULL);
++      if (codec_name)
++        *codec_name = g_strdup ("Microsoft Windows Media VC-1");
++      break;
++#endif
++
+     case GST_MAKE_FOURCC ('W', 'V', 'C', '1'):
+       caps = gst_caps_new_simple ("video/x-wmv",
+           "wmvversion", G_TYPE_INT, 3, "format", G_TYPE_STRING, "WVC1", NULL);
+@@ -1240,7 +1249,7 @@ gst_riff_create_audio_caps (guint16 codec_id,
+           GST_WARNING ("Invalid block align: %d > %d", ba, (32 / 8) * ch);
+           wd = GST_ROUND_UP_8 (strf->bits_per_sample);
+         } else if (ba != 0) {
+-          /* If we have an empty blockalign, we take the width contained in 
++          /* If we have an empty blockalign, we take the width contained in
+            * strf->bits_per_sample */
+           wd = ba * 8 / ch;
+         } else {
+@@ -1429,6 +1438,7 @@ gst_riff_create_audio_caps (guint16 codec_id,
+       }
+       caps = gst_caps_new_simple ("audio/x-adpcm",
+           "layout", G_TYPE_STRING, "dvi", NULL);
++
+       if (codec_name)
+         *codec_name = g_strdup ("DVI ADPCM audio");
+       block_align = TRUE;
+@@ -1507,6 +1517,9 @@ gst_riff_create_audio_caps (guint16 codec_id,
+         *codec_name = g_strdup ("AMR Wide Band (WB)");
+       break;
+ 
++#ifdef TCL_PATCH
++    case GST_RIFF_WAVE_FORMAT_VORBIS:
++#endif
+     case GST_RIFF_WAVE_FORMAT_VORBIS1: /* ogg/vorbis mode 1 */
+     case GST_RIFF_WAVE_FORMAT_VORBIS2: /* ogg/vorbis mode 2 */
+     case GST_RIFF_WAVE_FORMAT_VORBIS3: /* ogg/vorbis mode 3 */
+@@ -1734,7 +1747,18 @@ gst_riff_create_audio_caps (guint16 codec_id,
+               strf->blockalign = strf->av_bps * strf->channels;
+             }
+           }
++
++#ifdef TCL_PATCH
++          if (strf != NULL && strf->channels != 0 && strf->rate != 0) {
++            caps = gst_caps_new_simple ("audio/x-mulaw",
++              "channels", G_TYPE_INT, strf->channels,
++              "rate", G_TYPE_INT, strf->rate, NULL);
++          } else {
++            caps = gst_caps_new_empty_simple ("audio/x-mulaw");
++          }
++#else
+           caps = gst_caps_new_empty_simple ("audio/x-mulaw");
++#endif
+           if (codec_name)
+             *codec_name = g_strdup ("Mu-law audio");
+         } else if (subformat_guid[0] == 0x00000092) {
+@@ -1747,10 +1771,55 @@ gst_riff_create_audio_caps (guint16 codec_id,
+             GST_RIFF_WAVE_FORMAT_EXTENSIBLE) {
+           GST_DEBUG ("WAVE_FORMAT_EXTENSIBLE nested");
+         } else {
+-          /* recurse where no special consideration has yet to be identified 
++          /* recurse where no special consideration has yet to be identified
+            * for the subformat guid */
++#ifdef TCL_PATCH
++          if (subformat_guid[0] == GST_RIFF_WAVE_FORMAT_AAC) {
++          //The first 22 bytes of codec_data have been read out.In case of aac, they should be removed.
++            GstBuffer *codec_data_tmp = NULL;
++            if (size - 22 > 0) {
++              codec_data_tmp = gst_buffer_copy(strf_data);
++              gst_buffer_resize(codec_data_tmp, 22, size - 22);
++              GST_INFO ("codec_data_tmp size is %" G_GSIZE_FORMAT" ", gst_buffer_get_size (codec_data_tmp));
++              GST_INFO ("strf_data size is %" G_GSIZE_FORMAT" ", gst_buffer_get_size (strf_data));
++            }
++            caps = gst_riff_create_audio_caps (subformat_guid[0], strh, strf,
++                codec_data_tmp, strd_data, codec_name, channel_reorder_map);
++            gst_buffer_unref (codec_data_tmp);
++          } else if (subformat_guid[0] == GST_RIFF_WAVE_FORMAT_WMAV3) {
++            const guint8 *wmadata = (const guint8 *) strf;
++            guint8 *extra = NULL;
++            GstBuffer *codec_data_tmp = NULL;
++            gsize size = gst_buffer_get_size(strf_data);
++            // 0x0162 is WMA10, 0x0012 is size = 18, and the WAVEFORMATEX is 18 bytes
++            if (size - 22 + 18 > 0) {
++              guint16 val1 = 0x0162;
++              guint16 val2 = 0x0012;
++              extra = g_malloc(size - 22 + 18);
++              memcpy (extra, &val1, 2);
++              memcpy (extra + 2, wmadata + 2, 14);
++              memcpy (extra + 16, &val2, 2);
++              memcpy (extra + 18, wmadata + 18 + 22, size - 22);
++              codec_data_tmp = gst_buffer_new_and_alloc (size -22 + 18);
++              gst_buffer_fill (codec_data_tmp, 0, extra, size -22 + 18);
++              GST_INFO ("codec_data_tmp size is %" G_GSIZE_FORMAT" ", gst_buffer_get_size (codec_data_tmp));
++            }
++            caps = gst_riff_create_audio_caps (subformat_guid[0], strh, strf,
++                codec_data_tmp, strd_data, codec_name, channel_reorder_map);
++            if (extra) {
++              g_free (extra);
++            }
++            if (codec_data_tmp) {
++              gst_buffer_unref (codec_data_tmp);
++            }
++          } else {
++            caps = gst_riff_create_audio_caps (subformat_guid[0], strh, strf,
++                strf_data, strd_data, codec_name, channel_reorder_map);
++          }
++#elif
+           caps = gst_riff_create_audio_caps (subformat_guid[0], strh, strf,
+               strf_data, strd_data, codec_name, channel_reorder_map);
++#endif
+           if (!codec_name)
+             GST_DEBUG ("WAVE_FORMAT_EXTENSIBLE audio");
+           if (caps) {
+diff --git a/subprojects/gst-plugins-base/gst-libs/gst/tag/gsttagdemux.c b/subprojects/gst-plugins-base/gst-libs/gst/tag/gsttagdemux.c
+index 5702f7ca9e..fb532747c5 100644
+--- a/subprojects/gst-plugins-base/gst-libs/gst/tag/gsttagdemux.c
++++ b/subprojects/gst-plugins-base/gst-libs/gst/tag/gsttagdemux.c
+@@ -1685,9 +1685,13 @@ gst_tag_demux_read_range (GstTagDemux * demux, GstObject * parent,
+   if (ret == GST_FLOW_OK && *buffer) {
+     if (!gst_tag_demux_trim_buffer (demux, buffer, &size))
+       goto read_beyond_end;
+-
++#ifdef TCL_PATCH
++    if(*buffer == NULL)
++      return GST_FLOW_ERROR;
++#else
+     /* this should only happen in streaming mode */
+     g_assert (*buffer != NULL);
++#endif
+   }
+ 
+   return ret;
+diff --git a/subprojects/gst-plugins-base/gst/playback/gstdecodebin2.c b/subprojects/gst-plugins-base/gst/playback/gstdecodebin2.c
+index 41f8cdfaf0..ac69758d64 100644
+--- a/subprojects/gst-plugins-base/gst/playback/gstdecodebin2.c
++++ b/subprojects/gst-plugins-base/gst/playback/gstdecodebin2.c
+@@ -241,14 +241,22 @@ enum
+ 
+ /* automatic sizes, while prerolling we buffer up to 8MB, we ignore time
+  * and buffers in this case. */
++#ifdef TCL_PATCH
++#define AUTO_PREROLL_SIZE_BYTES                  16 * 1024 * 1024
++#else
+ #define AUTO_PREROLL_SIZE_BYTES                  8 * 1024 * 1024
++#endif
+ #define AUTO_PREROLL_SIZE_BUFFERS                0
+ #define AUTO_PREROLL_NOT_SEEKABLE_SIZE_TIME      10 * GST_SECOND
+ #define AUTO_PREROLL_SEEKABLE_SIZE_TIME          0
+ 
+ /* when playing, keep a max of 8MB of data but try to keep the number of buffers
+  * as low as possible (try to aim for 5 buffers) */
++#ifdef TCL_PATCH
++#define AUTO_PLAY_SIZE_BYTES        16 * 1024 * 1024
++#else
+ #define AUTO_PLAY_SIZE_BYTES        8 * 1024 * 1024
++#endif
+ #define AUTO_PLAY_SIZE_BUFFERS      5
+ #define AUTO_PLAY_SIZE_TIME         0
+ 
+@@ -2131,6 +2139,13 @@ connect_pad (GstDecodeBin * dbin, GstElement * src, GstDecodePad * dpad,
+ 
+   /* 1. is element demuxer or parser */
+   if (is_demuxer) {
++#ifdef TCL_PATCH
++    if (strstr(GST_OBJECT_NAME (GST_OBJECT_PARENT(pad)),"dashqtdemux") ||
++        strstr(GST_OBJECT_NAME (GST_OBJECT_PARENT(pad)),"hlsdemux") ||
++        strstr(GST_OBJECT_NAME (GST_OBJECT_PARENT(pad)),"midemux")) {
++      GST_DEBUG_OBJECT(src, "do not connect to multiqueue for dashqtdemux/hlsdemux/midemux");
++    } else {
++#endif
+     GST_LOG_OBJECT (src,
+         "is a demuxer, connecting the pad through multiqueue '%s'",
+         GST_OBJECT_NAME (chain->parent->multiqueue));
+@@ -2148,6 +2163,9 @@ connect_pad (GstDecodeBin * dbin, GstElement * src, GstDecodePad * dpad,
+     gst_pad_sticky_events_foreach (pad, copy_sticky_events, mqpad);
+     pad = mqpad;
+     decode_pad_set_target (dpad, pad);
++#ifdef TCL_PATCH
++    }
++#endif
+   }
+ 
+   error_details = g_string_new ("");
+@@ -2805,6 +2823,13 @@ expose_pad (GstDecodeBin * dbin, GstElement * src, GstDecodePad * dpad,
+    * This is the case if a demuxer directly exposed a raw pad.
+    */
+   if (chain->parent && !chain->elements && src != chain->parent->multiqueue) {
++#ifdef TCL_PATCH
++     if (strstr(GST_OBJECT_NAME (GST_OBJECT_PARENT(pad)),"dashqtdemux") ||
++         strstr(GST_OBJECT_NAME (GST_OBJECT_PARENT(pad)),"hlsdemux") ||
++         strstr(GST_OBJECT_NAME (GST_OBJECT_PARENT(pad)),"midemux")) {
++         GST_DEBUG_OBJECT(src, "do not connect to multiqueue for dashqtdemux/hlsdemux/midemux");
++     } else {
++#endif
+     GST_LOG_OBJECT (src, "connecting the pad through multiqueue");
+ 
+     decode_pad_set_target (dpad, NULL);
+@@ -2812,6 +2837,9 @@ expose_pad (GstDecodeBin * dbin, GstElement * src, GstDecodePad * dpad,
+       goto beach;
+     pad = mqpad;
+     decode_pad_set_target (dpad, pad);
++#ifdef TCL_PATCH
++    }
++#endif
+   }
+ 
+   gst_decode_pad_activate (dpad, chain);
+@@ -5152,6 +5180,13 @@ gst_decode_pad_query (GstPad * pad, GstObject * parent, GstQuery * query)
+   GstDecodePad *dpad = GST_DECODE_PAD (parent);
+   gboolean ret = FALSE;
+ 
++#ifdef TCL_PATCH
++  if (dpad == NULL || dpad->chain == NULL) {
++    GST_ERROR("dpad == NULL or dpad->chain == NULL");
++    ret = gst_pad_query_default (pad, parent, query);
++    return ret;
++  }
++#endif
+   CHAIN_MUTEX_LOCK (dpad->chain);
+   if (!dpad->exposed && !dpad->dbin->shutdown && !dpad->chain->deadend
+       && dpad->chain->elements) {
+diff --git a/subprojects/gst-plugins-base/gst/playback/gstplaybin2.c b/subprojects/gst-plugins-base/gst/playback/gstplaybin2.c
+index c02ab727e9..b79c7011fd 100644
+--- a/subprojects/gst-plugins-base/gst/playback/gstplaybin2.c
++++ b/subprojects/gst-plugins-base/gst/playback/gstplaybin2.c
+@@ -235,6 +235,10 @@ GST_DEBUG_CATEGORY_STATIC (gst_play_bin_debug);
+ 
+ #define VOLUME_MAX_DOUBLE 10.0
+ 
++#ifdef TCL_PATCH
++#define MAX_STREAM_SEQUENCE 32
++#endif
++
+ typedef struct _GstPlayBin GstPlayBin;
+ typedef struct _GstPlayBinClass GstPlayBinClass;
+ typedef struct _GstSourceGroup GstSourceGroup;
+@@ -289,6 +293,28 @@ typedef struct
+   guint n_comm_cf;              /* number of common caps features */
+ } GstAVElement;
+ 
++#ifdef TCL_PATCH
++/* extern subtitle structure
++ * every one have one pipe
++ * holding uri/decodebin/signals
++ */
++typedef struct _GstSubUriInfo
++{
++  gchar *uri;
++  gint file_fd;
++  GstElement *decodebin;
++  GstPad *sinkpad;
++  gulong sub_pad_added_id;
++  gulong sub_pad_removed_id;
++  gulong sub_no_more_pads_id;
++  gulong sub_autoplug_continue_id;
++  gulong sub_autoplug_query_id;
++  gulong block_id;
++  GMutex suburi_flushes_to_drop_lock;
++  GSList *suburi_flushes_to_drop;
++}GstSubUriInfo;
++#endif
++
+ /* a structure to hold the objects for decoding a uri and the subtitle uri
+  */
+ struct _GstSourceGroup
+@@ -299,7 +325,6 @@ struct _GstSourceGroup
+ 
+   gboolean valid;               /* the group has valid info to start playback */
+   gboolean active;              /* the group is active */
+-
+   /* properties */
+   gchar *uri;
+   gchar *suburi;
+@@ -359,6 +384,14 @@ struct _GstSourceGroup
+ 
+   /* combiners for different streams */
+   GstSourceCombine combiner[PLAYBIN_STREAM_LAST];
++
++#ifdef TCL_PATCH
++  GList *suburiInfoList;        /* data format is GstSubUriInfo */
++  gint file_fd;
++  gint64 file_start_offset;
++  gint64 file_length;
++#endif
++
+ };
+ 
+ #define GST_PLAY_BIN_GET_LOCK(bin) (&((GstPlayBin*)(bin))->lock)
+@@ -465,8 +498,15 @@ struct _GstPlayBin
+ 
+   guint64 ring_buffer_max_size; /* 0 means disabled */
+ 
++#ifdef TCL_PATCH
++  gint    stream_sequence_map[PLAYBIN_STREAM_LAST][MAX_STREAM_SEQUENCE];/*video,audio and text's sequence map,max sequence is 32*/
++  gboolean dash_flag;
++#endif
+   GList *contexts;
+ 
++#ifdef TCL_PATCH
++  gboolean imageplayer;
++#endif
+   gboolean is_live;
+ };
+ 
+@@ -566,7 +606,26 @@ enum
+   PROP_AUDIO_FILTER,
+   PROP_VIDEO_FILTER,
+   PROP_MULTIVIEW_MODE,
+-  PROP_MULTIVIEW_FLAGS
++  PROP_MULTIVIEW_FLAGS,
++#ifdef TCL_PATCH
++  PROP_IMAGE_PLAY,
++#endif
++
++#ifdef TCL_PATCH
++  PROP_SUB_VISIBLE,
++  PROP_AV_SYNCDONE,
++  PROP_AV_SYNC_UPDATE,
++  PROP_VIDEO_DECODER_ID,
++
++  PROP_FILE_FD,
++  PROP_FILE_START_OFFSET,
++  PROP_FILE_LENGTH,
++  PROP_SUB_FILE_FD,
++
++  PROP_SUB_SURFACE,
++  PROP_SUB_USER_SET,
++  PROP_SUB_TYPE_IS_TEXT
++#endif
+ };
+ 
+ /* signals */
+@@ -634,9 +693,17 @@ static void no_more_pads_cb (GstElement * decodebin, GstSourceGroup * group);
+ static void pad_removed_cb (GstElement * decodebin, GstPad * pad,
+     GstSourceGroup * group);
+ 
++#ifdef TCL_PATCH
++#if 0
++static void gst_play_bin_suburidecodebin_block (GstSourceGroup * group,
++    GstSubUriInfo * suburiinfo, gboolean block);
++#endif
++static void gst_play_bin_suburidecodebin_seek_to_start (GstSourceGroup * group,GstElement * subDecodebin);
++#else
+ static void gst_play_bin_suburidecodebin_block (GstSourceGroup * group,
+     GstElement * suburidecodebin, gboolean block);
+ static void gst_play_bin_suburidecodebin_seek_to_start (GstSourceGroup * group);
++#endif
+ static void
+ gst_play_bin_update_context (GstPlayBin * playbin, GstContext * context);
+ 
+@@ -656,6 +723,17 @@ static void gst_play_bin_navigation_init (gpointer g_iface,
+ static void gst_play_bin_colorbalance_init (gpointer g_iface,
+     gpointer g_iface_data);
+ 
++#ifdef TCL_PATCH
++//suburi
++static gboolean gst_play_bin_subUriInfoListFree(GstSourceGroup * group);
++static gboolean gst_play_bin_subUriIsExist(gchar* suburi, GstSourceGroup * group);
++static gboolean gst_play_bin_subUriInfoListAddSuburi(const gchar* uri,GstSourceGroup * group);
++static gboolean gst_play_bin_subUriDecodeBinIsExist(GstElement* decodebin,GstSourceGroup * group);
++static gboolean gst_play_bin_subUriInfoList_setSinkPad(GstElement* decodebin,GstSourceGroup * group, GstPad* sinkPad);
++static GstElement* gst_play_bin_subUriInfoList_getSubdecodebinBySinkpad(GstPad *sinkPad, GstSourceGroup * group);
++static GstSubUriInfo* gst_play_bin_subUriInfoList_getSuburiInfo(GstElement* decodebin,GstSourceGroup * group);
++#endif
++
+ static GType gst_play_bin_get_type (void);
+ 
+ static void
+@@ -1019,6 +1097,71 @@ gst_play_bin_class_init (GstPlayBinClass * klass)
+           "Override details of the multiview frame layout",
+           GST_TYPE_VIDEO_MULTIVIEW_FLAGS, GST_VIDEO_MULTIVIEW_FLAGS_NONE,
+           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++#ifdef TCL_PATCH
++  g_object_class_install_property (gobject_klass, PROP_SUB_VISIBLE,
++      g_param_spec_boolean ("sub-visible",
++          "visible",
++          "Whether to show subtitles", FALSE,
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_klass, PROP_AV_SYNCDONE,
++      g_param_spec_boolean ("avsyncdone",
++          "avsyncdone",
++          "tell subtitle av sync done", FALSE,
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_klass, PROP_AV_SYNC_UPDATE,
++      g_param_spec_pointer ("avsync-update",
++          "update av sync data",
++          "The AVSync update user_data",
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_klass, PROP_VIDEO_DECODER_ID,
++      g_param_spec_pointer ("video-decoder-id", "video decoder id",
++          "The index of video decoder id",
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_klass, PROP_FILE_FD,
++      g_param_spec_int ("file-fd", "File Fd",
++          "Fd for file to read", G_MININT, G_MAXINT, -1,
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_klass, PROP_FILE_START_OFFSET,
++      g_param_spec_int64 ("file-start-offset", "File Start Offset",
++          "Start offset for file to read", G_MININT64, G_MAXINT64, 0,
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_klass, PROP_FILE_LENGTH,
++      g_param_spec_int64 ("file-length", "File Length",
++          "Length for file to read", G_MININT64, G_MAXINT64, 0,
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_klass, PROP_SUB_FILE_FD,
++      g_param_spec_int ("sub-file-fd", "Subtitle File Fd",
++          "Fd for Subtitle file to read", G_MININT, G_MAXINT, -1,
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS ));
++
++  g_object_class_install_property (gobject_klass, PROP_SUB_SURFACE,
++    g_param_spec_pointer ("sub-surface","Subtitle surface",
++        "Surface for subtitle",
++        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_klass, PROP_SUB_USER_SET,
++      g_param_spec_pointer ("sub-user-set","subtitle user setting",
++          "User subtitle display setting",
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_klass, PROP_IMAGE_PLAY,
++      g_param_spec_boolean ("imageplayer", "image player",
++          "when TURE,image player pipeline",FALSE,
++           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  // add by liwei 2024.02.07, for distinguishing text and picture subtitle
++  g_object_class_install_property (gobject_klass, PROP_SUB_TYPE_IS_TEXT,
++      g_param_spec_boolean ("sub-type-is-text", "subtitle type",
++           "tell subtitle type. TRUE: text; FALSE: picture", TRUE,
++           G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
++#endif
+ 
+   /**
+    * GstPlayBin::about-to-finish
+@@ -1397,6 +1540,13 @@ init_group (GstPlayBin * playbin, GstSourceGroup * group)
+       gst_subtitle_overlay_create_factory_caps;
+   group->combiner[PLAYBIN_STREAM_TEXT].type = GST_PLAY_SINK_TYPE_TEXT;
+   group->combiner[PLAYBIN_STREAM_TEXT].channels = group->text_channels;
++
++#ifdef TCL_PATCH
++  group->file_fd = -1;
++  group->file_start_offset = 0;
++  group->file_length = 0;
++  group->suburiInfoList = NULL;
++#endif
+ }
+ 
+ static void
+@@ -1432,6 +1582,10 @@ free_group (GstPlayBin * playbin, GstSourceGroup * group)
+   if (group->pending_buffering_msg)
+     gst_message_unref (group->pending_buffering_msg);
+   group->pending_buffering_msg = NULL;
++
++#ifdef TCL_PATCH
++  gst_play_bin_subUriInfoListFree(group);
++#endif
+ }
+ 
+ static void
+@@ -1546,6 +1700,7 @@ gst_play_bin_init (GstPlayBin * playbin)
+   /* first filter out the interesting element factories */
+   g_mutex_init (&playbin->elements_lock);
+ 
++#ifndef TCL_PATCH
+   /* add sink */
+   playbin->playsink =
+       g_object_new (GST_TYPE_PLAY_SINK, "name", "playsink", "send-event-mode",
+@@ -1559,7 +1714,7 @@ gst_play_bin_init (GstPlayBin * playbin)
+       G_CALLBACK (notify_mute_cb), playbin);
+   g_signal_connect (playbin->playsink, "value-changed",
+       G_CALLBACK (colorbalance_value_changed_cb), playbin);
+-
++#endif
+   playbin->current_video = DEFAULT_CURRENT_VIDEO;
+   playbin->current_audio = DEFAULT_CURRENT_AUDIO;
+   playbin->current_text = DEFAULT_CURRENT_TEXT;
+@@ -1572,6 +1727,14 @@ gst_play_bin_init (GstPlayBin * playbin)
+ 
+   playbin->multiview_mode = GST_VIDEO_MULTIVIEW_FRAME_PACKING_NONE;
+   playbin->multiview_flags = GST_VIDEO_MULTIVIEW_FLAGS_NONE;
++
++#ifdef TCL_PATCH
++  playbin->dash_flag = FALSE;
++  memset(playbin->stream_sequence_map,0,sizeof(playbin->stream_sequence_map));
++#endif
++#ifdef TCL_PATCH
++  playbin->imageplayer = FALSE;
++#endif
+ }
+ 
+ static void
+@@ -1700,6 +1863,89 @@ gst_play_bin_set_uri (GstPlayBin * playbin, const gchar * uri)
+   GST_PLAY_BIN_UNLOCK (playbin);
+ }
+ 
++#ifdef TCL_PATCH
++static void
++gst_play_bin_set_file_fd (GstPlayBin * playbin, gint fd)
++{
++  GstSourceGroup *group;
++  GST_PLAY_BIN_LOCK (playbin);
++  group = playbin->next_group;
++
++  GST_SOURCE_GROUP_LOCK (group);
++  group->file_fd = fd;
++  GST_SOURCE_GROUP_UNLOCK (group);
++
++  GST_INFO ("set new file fd to %d", fd);
++  GST_PLAY_BIN_UNLOCK (playbin);
++}
++
++static void
++gst_play_bin_set_file_start_offset (GstPlayBin * playbin, gint64 offset)
++{
++  GstSourceGroup *group;
++  GST_PLAY_BIN_LOCK (playbin);
++  group = playbin->next_group;
++
++  GST_SOURCE_GROUP_LOCK (group);
++  group->file_start_offset = offset;
++  GST_SOURCE_GROUP_UNLOCK (group);
++
++  GST_INFO ("set new file start offset to %lld", offset);
++  GST_PLAY_BIN_UNLOCK (playbin);
++}
++
++static void
++gst_play_bin_set_file_length (GstPlayBin * playbin, gint64 length)
++{
++  GstSourceGroup *group;
++  GST_PLAY_BIN_LOCK (playbin);
++  group = playbin->next_group;
++
++  GST_SOURCE_GROUP_LOCK (group);
++  group->file_length = length;
++  GST_SOURCE_GROUP_UNLOCK (group);
++
++  GST_INFO ("set new file length to %lld", length);
++  GST_PLAY_BIN_UNLOCK (playbin);
++}
++
++static void
++gst_play_bin_set_suburi_file_fd (GstPlayBin * playbin, gint fd)
++{
++  GstSourceGroup *group;
++  GST_PLAY_BIN_LOCK (playbin);
++  group = playbin->next_group;
++
++  GST_SOURCE_GROUP_LOCK (group);
++
++
++  GList* suburiInfoList = NULL;
++
++  suburiInfoList = group->suburiInfoList;
++
++  if (suburiInfoList == NULL) {
++    GST_SOURCE_GROUP_UNLOCK (group);
++    GST_PLAY_BIN_UNLOCK (playbin);
++    return;
++  }
++
++  for (;suburiInfoList;suburiInfoList = suburiInfoList->next) {
++    if (suburiInfoList->data != NULL) {
++      GstSubUriInfo* pSuburiInfo = (GstSubUriInfo*)suburiInfoList->data;
++      if (pSuburiInfo->uri != NULL && pSuburiInfo->file_fd == -1) {
++        GST_INFO("set suburi file fd = %d",fd);
++        pSuburiInfo->file_fd = fd;
++        break;
++      }
++    }
++  }
++
++  GST_SOURCE_GROUP_UNLOCK (group);
++  GST_PLAY_BIN_UNLOCK (playbin);
++}
++
++#endif
++
+ static void
+ gst_play_bin_set_suburi (GstPlayBin * playbin, const gchar * suburi)
+ {
+@@ -1709,8 +1955,13 @@ gst_play_bin_set_suburi (GstPlayBin * playbin, const gchar * suburi)
+   group = playbin->next_group;
+ 
+   GST_SOURCE_GROUP_LOCK (group);
++
++#ifdef TCL_PATCH
++  gst_play_bin_subUriInfoListAddSuburi(suburi,group);
++#else
+   g_free (group->suburi);
+   group->suburi = g_strdup (suburi);
++#endif
+   GST_SOURCE_GROUP_UNLOCK (group);
+ 
+   GST_DEBUG ("setting new .sub uri to %s", suburi);
+@@ -1833,6 +2084,41 @@ get_tags (GstPlayBin * playbin, GstSourceGroup * group, gint type, gint stream)
+   sinkpad = g_ptr_array_index (channels, stream);
+   g_object_get (sinkpad, "tags", &result, NULL);
+ 
++#ifdef TCL_PATCH
++  /* 待优化，将记录加入到pad中保存 */
++  if (result)  {
++    if (type == PLAYBIN_STREAM_TEXT) {
++      gchar* lang = NULL;
++      gst_tag_list_get_string (result, GST_TAG_LANGUAGE_CODE, &lang);
++      if (lang == NULL) {
++        GstCaps* caps = gst_pad_get_current_caps (sinkpad);
++        if (caps) {
++          const gchar* language  = NULL;
++          GstStructure* st = gst_caps_get_structure (caps, 0);
++          language         = gst_structure_get_string (st, "language");
++          if (language) {
++            result = gst_tag_list_make_writable (result);
++            gst_tag_list_add (result, GST_TAG_MERGE_APPEND, GST_TAG_LANGUAGE_CODE, language, NULL);
++          }
++          gst_caps_unref (caps);
++        }
++      } else {
++        g_free(lang);
++      }
++    } else if (type == PLAYBIN_STREAM_AUDIO) {
++      GstCaps* curcaps = gst_pad_get_current_caps (sinkpad);
++      if (curcaps) {
++        GstStructure* structure = gst_caps_get_structure (curcaps, 0);
++        gint          channels  = 0;
++        if (gst_structure_get_int (structure, "channels", &channels)) {
++            result = gst_tag_list_make_writable (result);
++            gst_tag_list_add (result, GST_TAG_MERGE_APPEND, GST_TAG_AUDIO_CHANNELS, channels, NULL);
++        }
++        gst_caps_unref (curcaps);
++      }
++    }
++  }
++#endif
+   return result;
+ }
+ 
+@@ -1885,6 +2171,77 @@ gst_play_bin_convert_sample (GstPlayBin * playbin, GstCaps * caps)
+ }
+ 
+ /* Returns current stream number, or -1 if none has been selected yet */
++#ifdef TCL_PATCH
++static int
++get_current_stream_number (GstPlayBin * playbin, GstSourceCombine * combine,
++    GPtrArray * channels, gint *stream_sequence_map)
++{
++  /* Internal API cleanup would make this easier... */
++  int i;
++  GstPad *pad, *current;
++  GstObject *combiner = NULL;
++  int ret = -1;
++
++  if (!combine->has_active_pad) {
++    GST_WARNING_OBJECT (playbin,"combiner doesn't have the \"active-pad\" property");
++    return ret;
++  }
++
++  GST_INFO_OBJECT(playbin,"channels->len=%d\n",channels->len);
++  for (i = 0; i < channels->len; i++)  {
++    pad = g_ptr_array_index (channels, i);
++    //GST_INFO_OBJECT (playbin, "got pad %s:%s from channels", GST_DEBUG_PAD_NAME (pad));
++    if ((combiner = gst_pad_get_parent (pad))) {
++      g_object_get (combiner, "active-pad", &current, NULL);
++
++      /*Added by Yakov*/
++      guint stream_squence = 0;
++      GstCaps *caps = NULL;
++      caps = gst_pad_get_current_caps(pad);
++      if (!caps) {
++        //caps = gst_pad_query_caps (pad, NULL); /*used this caps maybe is ANY*/
++        caps = gst_pad_get_allowed_caps (pad);
++        GST_INFO_OBJECT (playbin,"pad %s:%s with caps %" GST_PTR_FORMAT " from channels",
++                          GST_DEBUG_PAD_NAME (pad), caps);
++      }
++      if (caps && (!gst_caps_is_any (caps))) {
++        GstStructure *structure = gst_caps_get_structure (caps, 0);
++
++        if (structure && gst_structure_has_field(structure,"streamSquence")) {
++          gst_structure_get_uint(structure, "streamSquence", &stream_squence);
++          playbin->dash_flag = TRUE;
++        }
++
++        stream_sequence_map[stream_squence] = i;
++        GST_INFO_OBJECT(playbin,"stream_squence=%d,i=%d\n",stream_squence,i);
++
++        if (pad == current) {
++          if (playbin->dash_flag) {
++            ret = stream_squence;
++            GST_INFO_OBJECT(playbin,"stream_squence=%d,i=%d\n",stream_squence,i);
++          } else {
++            gst_caps_unref (caps);
++            gst_object_unref (combiner);
++            gst_object_unref (current);
++            ret = i;
++            break;
++          }
++        }
++      } else
++        ret = stream_squence;
++
++      if(caps)
++        gst_caps_unref (caps);
++      if (current)
++        gst_object_unref (current);
++      gst_object_unref (combiner);
++    }
++  }
++
++  GST_INFO_OBJECT(playbin, "ret=%d",ret);
++  return ret;
++}
++#else
+ static int
+ get_current_stream_number (GstPlayBin * playbin, GstSourceCombine * combine,
+     GPtrArray * channels)
+@@ -1920,7 +2277,7 @@ get_current_stream_number (GstPlayBin * playbin, GstSourceCombine * combine,
+ 
+   return ret;
+ }
+-
++#endif
+ static gboolean
+ gst_play_bin_send_custom_event (GstObject * combiner, const gchar * event_name)
+ {
+@@ -1964,8 +2321,14 @@ gst_play_bin_set_current_video_stream (GstPlayBin * playbin, gint stream)
+   if (stream == -1 || channels->len <= stream) {
+     sinkpad = NULL;
+   } else {
+-    /* take channel from selected stream */
+-    sinkpad = g_ptr_array_index (channels, stream);
++#ifdef TCL_PATCH
++    if(playbin->dash_flag)
++      /*Added by Yakov*/
++      sinkpad = g_ptr_array_index (channels, playbin->stream_sequence_map[PLAYBIN_STREAM_VIDEO][stream]);
++     else
++#endif
++      /* take channel from selected stream */
++      sinkpad = g_ptr_array_index (channels, stream);
+   }
+ 
+   if (sinkpad)
+@@ -2019,7 +2382,6 @@ gst_play_bin_set_current_audio_stream (GstPlayBin * playbin, gint stream)
+   GstSourceGroup *group;
+   GPtrArray *channels;
+   GstPad *sinkpad;
+-
+   GST_PLAY_BIN_LOCK (playbin);
+ 
+   GST_DEBUG_OBJECT (playbin, "Changing current audio stream %d -> %d",
+@@ -2034,8 +2396,16 @@ gst_play_bin_set_current_audio_stream (GstPlayBin * playbin, gint stream)
+   if (stream == -1 || channels->len <= stream) {
+     sinkpad = NULL;
+   } else {
+-    /* take channel from selected stream */
+-    sinkpad = g_ptr_array_index (channels, stream);
++#ifdef TCL_PATCH
++    if (playbin->dash_flag) {
++      /*Added by Yakov*/
++      sinkpad = g_ptr_array_index (channels, playbin->stream_sequence_map[PLAYBIN_STREAM_AUDIO][stream]);
++      GST_INFO_OBJECT(playbin,"set index:%d ,convent real index=%d",stream,
++         playbin->stream_sequence_map[PLAYBIN_STREAM_AUDIO][stream]);
++    } else
++#endif
++      /* take channel from selected stream */
++      sinkpad = g_ptr_array_index (channels, stream);
+   }
+ 
+   if (sinkpad)
+@@ -2083,6 +2453,57 @@ no_channels:
+   }
+ }
+ 
++#ifdef TCL_PATCH
++static void
++gst_play_bin_suburidecodebin_seek_to_start (GstSourceGroup * group, GstElement * subDecodebin)
++{
++  GstElement *suburidecodebin = subDecodebin;
++  GstIterator *it = gst_element_iterate_src_pads (suburidecodebin);
++  GstPad *sinkpad;
++  GstSubUriInfo *suburiInfo = NULL;
++  GValue item = { 0, };
++  suburiInfo = gst_play_bin_subUriInfoList_getSuburiInfo(suburidecodebin,group);
++
++  if (NULL == suburiInfo) {
++    return;
++  }
++  if (it && gst_iterator_next (it, &item) == GST_ITERATOR_OK
++      && ((sinkpad = g_value_get_object (&item)) != NULL)) {
++    GstEvent *event;
++    guint32 seqnum;
++
++    event =
++        gst_event_new_seek (1.0, GST_FORMAT_BYTES, GST_SEEK_FLAG_FLUSH,
++        GST_SEEK_TYPE_SET, 0, GST_SEEK_TYPE_NONE, -1);
++    seqnum = gst_event_get_seqnum (event);
++    /* store the seqnum to drop flushes from this seek later */
++    g_mutex_lock (&suburiInfo->suburi_flushes_to_drop_lock);
++    suburiInfo->suburi_flushes_to_drop =
++        g_slist_append (suburiInfo->suburi_flushes_to_drop,
++        GUINT_TO_POINTER (seqnum));
++    g_mutex_unlock (&suburiInfo->suburi_flushes_to_drop_lock);
++
++    if (!gst_pad_send_event (sinkpad, event)) {
++      event =
++          gst_event_new_seek (1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH,
++          GST_SEEK_TYPE_SET, 0, GST_SEEK_TYPE_NONE, -1);
++      gst_event_set_seqnum (event, seqnum);
++      if (!gst_pad_send_event (sinkpad, event)) {
++        GST_DEBUG_OBJECT (suburidecodebin, "Seeking to the beginning failed!");
++        g_mutex_lock (&suburiInfo->suburi_flushes_to_drop_lock);
++        suburiInfo->suburi_flushes_to_drop =
++            g_slist_remove (suburiInfo->suburi_flushes_to_drop,
++            GUINT_TO_POINTER (seqnum));
++        g_mutex_unlock (&suburiInfo->suburi_flushes_to_drop_lock);
++      }
++    }
++
++    g_value_unset (&item);
++  }
++  if (it)
++    gst_iterator_free (it);
++}
++#else
+ static void
+ gst_play_bin_suburidecodebin_seek_to_start (GstSourceGroup * group)
+ {
+@@ -2130,7 +2551,7 @@ gst_play_bin_suburidecodebin_seek_to_start (GstSourceGroup * group)
+   if (it)
+     gst_iterator_free (it);
+ }
+-
++#endif
+ static void
+ source_combine_remove_pads (GstPlayBin * playbin, GstSourceCombine * combine)
+ {
+@@ -2161,6 +2582,202 @@ block_serialized_data_cb (GstPad * pad, GstPadProbeInfo * info,
+   return GST_PAD_PROBE_OK;
+ }
+ 
++#ifdef TCL_PATCH
++#if 0
++static void
++gst_play_bin_suburidecodebin_block (GstSourceGroup * group,
++    GstSubUriInfo * suburiinfo, gboolean block)
++{
++  GstIterator *it = gst_element_iterate_src_pads (suburiinfo->decodebin);
++  gboolean done = FALSE;
++  GValue item = { 0, };
++
++  GST_DEBUG_OBJECT (suburiinfo->decodebin, "Blocking suburidecodebin: %d", block);
++
++  if (!it)
++    return;
++  while (!done) {
++    GstPad *sinkpad;
++
++    switch (gst_iterator_next (it, &item)) {
++      case GST_ITERATOR_OK:
++        sinkpad = g_value_get_object (&item);
++        if (block) {
++          suburiinfo->block_id =
++              gst_pad_add_probe (sinkpad, GST_PAD_PROBE_TYPE_BLOCK_DOWNSTREAM,
++              block_serialized_data_cb, NULL, NULL);
++        } else if (suburiinfo->block_id) {
++          gst_pad_remove_probe (sinkpad, suburiinfo->block_id);
++          suburiinfo->block_id = 0;
++        }
++        g_value_reset (&item);
++        break;
++      case GST_ITERATOR_DONE:
++        done = TRUE;
++        break;
++      case GST_ITERATOR_RESYNC:
++        gst_iterator_resync (it);
++        break;
++      case GST_ITERATOR_ERROR:
++        done = TRUE;
++        break;
++    }
++  }
++  g_value_unset (&item);
++  gst_iterator_free (it);
++}
++#endif
++static gboolean
++gst_play_bin_set_current_text_stream (GstPlayBin * playbin, gint stream)
++{
++  GstSourceGroup *group;
++  GPtrArray *channels;
++  GstPad *sinkpad;
++  GstElement * oldSubDecodebin = NULL;
++  GstElement * subDecodebin = NULL;
++  GstSubUriInfo * oldSubUriInfo = NULL;
++  GstSubUriInfo * subUriInfo = NULL;
++
++  GST_PLAY_BIN_LOCK (playbin);
++
++  GST_DEBUG_OBJECT (playbin, "Changing current text stream %d -> %d",
++      playbin->current_text, stream);
++
++  group = get_group (playbin);
++  if (!group->combiner[PLAYBIN_STREAM_TEXT].has_active_pad)
++    goto no_active_pad;
++  if (!(channels = group->text_channels))
++    goto no_channels;
++
++  if (stream == -1 || channels->len <= stream) {
++    sinkpad = NULL;
++  } else {
++    if(playbin->dash_flag)
++      /*Added by Yakov*/
++      sinkpad = g_ptr_array_index (channels, playbin->stream_sequence_map[PLAYBIN_STREAM_TEXT][stream]);
++    else
++      /* take channel from selected stream */
++      sinkpad = g_ptr_array_index (channels, stream);
++  }
++
++  if (sinkpad)
++    gst_object_ref (sinkpad);
++  GST_PLAY_BIN_UNLOCK (playbin);
++
++  if (sinkpad) {
++    GstObject *selector;
++
++    if ((selector = gst_pad_get_parent (sinkpad))) {
++      GstPad *old_sinkpad;
++
++      g_object_get (selector, "active-pad", &old_sinkpad, NULL);
++
++      oldSubDecodebin = gst_play_bin_subUriInfoList_getSubdecodebinBySinkpad(old_sinkpad,group);
++      subDecodebin = gst_play_bin_subUriInfoList_getSubdecodebinBySinkpad(sinkpad,group);
++
++      oldSubUriInfo = gst_play_bin_subUriInfoList_getSuburiInfo(oldSubDecodebin,group);
++      subUriInfo = gst_play_bin_subUriInfoList_getSuburiInfo(subDecodebin,group);
++
++      /* seek to the beginning */
++      /* when change subtitle track, we do not need av_syncdone message
++       * change subtitle track will not get avsyncdone,so we need to unlock it
++       */
++      if (old_sinkpad != sinkpad) {
++        gboolean need_unblock = FALSE;
++        gboolean need_block = FALSE;
++        gboolean need_seek = FALSE;
++        GstPad *peer = NULL, *oldpeer = NULL;
++        GstElement *parent_element = NULL, *old_parent_element = NULL;
++
++        /* Now check if we need to seek the suburidecodebin to the beginning
++         * or if we need to block all suburidecodebin sinkpads or if we need
++         * to unblock all suburidecodebin sinkpads
++         */
++        if (sinkpad)
++          peer = gst_pad_get_peer (sinkpad);
++        if (old_sinkpad)
++          oldpeer = gst_pad_get_peer (old_sinkpad);
++
++        if (peer)
++          parent_element = gst_pad_get_parent_element (peer);
++        if (oldpeer)
++          old_parent_element = gst_pad_get_parent_element (oldpeer);
++
++
++        need_block = (oldSubDecodebin != NULL
++            && parent_element != old_parent_element);
++        need_unblock = (subDecodebin != NULL
++            && parent_element != old_parent_element);
++        need_seek = (subDecodebin != NULL);
++
++        if (peer)
++          gst_object_unref (peer);
++        if (oldpeer)
++          gst_object_unref (oldpeer);
++        if (parent_element)
++          gst_object_unref (parent_element);
++        if (old_parent_element)
++          gst_object_unref (old_parent_element);
++
++        /* Block all suburidecodebin sinkpads */
++        if (need_block) {
++          //gst_play_bin_suburidecodebin_block (group, oldSubUriInfo,TRUE);
++        }
++
++        if (gst_play_bin_send_custom_event (selector, "playsink-custom-subtitle-flush"))
++          playbin->text_pending_flush_finish = TRUE;
++
++
++        /* 切换字幕的时候不需要av_syncdone消息，因为已经是av_syncdone,
++          * 但切换字幕会引起该控制变量置为初值FALSE,因此可以发一个该消息给插件，让其改为TRUE
++          */
++        {
++            gst_play_sink_set_av_syncdone_not_need(playbin->playsink);
++            gst_play_sink_set_av_syncdone(playbin->playsink);
++        }
++
++        /* activate the selected pad */
++        g_object_set (selector, "active-pad", sinkpad, NULL);
++
++
++        /* Unblock pads if necessary */
++        if (need_unblock) {
++          //gst_play_bin_suburidecodebin_block (group,subUriInfo,FALSE);
++        }
++
++        if (need_seek)
++          gst_play_bin_suburidecodebin_seek_to_start (group, subDecodebin);
++        else {
++          #if 0
++          // 避免堵死，收不到NewCaps消息
++          gst_element_send_event (GST_ELEMENT(selector), gst_event_new_flush_start());
++          gst_element_send_event (GST_ELEMENT(selector), gst_event_new_flush_stop(-1));
++          #endif
++        }
++      }
++      gst_object_unref (selector);
++
++      if (old_sinkpad)
++        gst_object_unref (old_sinkpad);
++    }
++    gst_object_unref (sinkpad);
++  }
++  return TRUE;
++
++no_active_pad:
++  {
++    GST_PLAY_BIN_UNLOCK (playbin);
++    GST_WARNING_OBJECT (playbin,
++        "can't switch text, the stream combiner's sink pads don't have the \"active-pad\" property");
++    return FALSE;
++  }
++no_channels:
++  {
++    GST_PLAY_BIN_UNLOCK (playbin);
++    return FALSE;
++  }
++}
++#else
+ static void
+ gst_play_bin_suburidecodebin_block (GstSourceGroup * group,
+     GstElement * suburidecodebin, gboolean block)
+@@ -2318,6 +2935,7 @@ no_channels:
+     return FALSE;
+   }
+ }
++#endif
+ 
+ static void
+ gst_play_bin_set_sink (GstPlayBin * playbin, GstPlaySinkType type,
+@@ -2506,6 +3124,60 @@ gst_play_bin_set_property (GObject * object, guint prop_id,
+       playbin->multiview_flags = g_value_get_flags (value);
+       GST_PLAY_BIN_UNLOCK (playbin);
+       break;
++#ifdef TCL_PATCH
++    case PROP_SUB_VISIBLE:
++      if (playbin->playsink) {
++        gst_play_sink_set_sub_status(playbin->playsink,g_value_get_boolean (value));
++      }
++      break;
++    case PROP_AV_SYNCDONE:
++      if (playbin->playsink) {
++        gst_play_sink_set_av_syncdone(playbin->playsink);
++      }
++      break;
++    case PROP_AV_SYNC_UPDATE:
++      if (playbin->playsink) {
++        gst_play_sink_set_av_sync_update(playbin->playsink,g_value_get_pointer (value));
++      }
++      break;
++    case PROP_VIDEO_DECODER_ID:
++      if (playbin->playsink) {
++        gst_play_sink_set_video_decoder_id (playbin->playsink,g_value_get_pointer (value));
++      }
++      break;
++    case PROP_FILE_FD:
++      gst_play_bin_set_file_fd(playbin, g_value_get_int(value));
++      break;
++    case PROP_FILE_START_OFFSET:
++      gst_play_bin_set_file_start_offset(playbin, g_value_get_int64(value));
++      break;
++    case PROP_FILE_LENGTH:
++      gst_play_bin_set_file_length(playbin, g_value_get_int64(value));
++      break;
++    case PROP_SUB_FILE_FD:
++      gst_play_bin_set_suburi_file_fd(playbin, g_value_get_int(value));
++      break;
++    case PROP_SUB_SURFACE:
++      if (playbin->playsink) {
++        gst_play_sink_set_sub_surface (playbin->playsink,g_value_get_pointer (value));
++      }
++      break;
++    case PROP_SUB_USER_SET:
++      if (playbin->playsink) {
++        GST_INFO("\033[0;32;40m=========== set property sub-user-set===========\033[m");
++        gst_play_sink_set_sub_user_set (playbin->playsink,g_value_get_pointer (value));
++      }
++      break;
++    case PROP_IMAGE_PLAY:
++    {
++      gboolean imageplayer = g_value_get_boolean (value);
++      GST_PLAY_BIN_LOCK (playbin);
++      playbin->imageplayer = imageplayer;
++      GST_PLAY_BIN_UNLOCK (playbin);
++      break;
++    }
++
++#endif
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+       break;
+@@ -2763,6 +3435,39 @@ gst_play_bin_get_property (GObject * object, guint prop_id, GValue * value,
+       g_value_set_flags (value, playbin->multiview_flags);
+       GST_OBJECT_UNLOCK (playbin);
+       break;
++#ifdef TCL_PATCH
++    case PROP_SUB_VISIBLE:
++    {
++      gboolean visible = TRUE;
++      gst_play_sink_get_sub_status(playbin->playsink,&visible);
++      g_value_set_boolean(value,visible);
++      break;
++    }
++    case PROP_AV_SYNCDONE:
++      break;
++    case PROP_AV_SYNC_UPDATE:
++      break;
++    case PROP_VIDEO_DECODER_ID:
++      break;
++    case PROP_FILE_FD:
++      break;
++    case PROP_FILE_START_OFFSET:
++      break;
++    case PROP_FILE_LENGTH:
++      break;
++    case PROP_SUB_FILE_FD:
++      break;
++    case PROP_SUB_SURFACE:
++      break;
++    case PROP_SUB_USER_SET:
++      break;
++    case PROP_IMAGE_PLAY:
++      g_value_set_boolean (value, playbin->imageplayer);
++      break;
++    case PROP_SUB_TYPE_IS_TEXT:
++      g_value_set_boolean (value, gst_play_sink_sub_type_is_text(playbin->playsink));
++      break;
++#endif
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+       break;
+@@ -2914,6 +3619,21 @@ gst_play_bin_handle_message (GstBin * bin, GstMessage * msg)
+           GST_OBJECT_NAME (src));
+       gst_message_unref (msg);
+       msg = NULL;
++#ifdef TCL_PATCH
++    } else {
++      if (src && (group = playbin->curr_group)) {
++        GList *list = group->suburiInfoList;
++        for (; list; list = list->next) {
++          GstSubUriInfo *suburiinfo = (GstSubUriInfo*)list->data;
++          if (suburiinfo && suburiinfo->decodebin &&
++              src == GST_OBJECT_CAST(suburiinfo->decodebin)) {
++            gst_message_unref (msg);
++            msg = NULL;
++            break;
++          }
++        }
++      }
++#endif
+     }
+   } else if (GST_MESSAGE_TYPE (msg) == GST_MESSAGE_STREAM_START) {
+     GstSourceGroup *new_group = playbin->curr_group;
+@@ -2953,11 +3673,86 @@ gst_play_bin_handle_message (GstBin * bin, GstMessage * msg)
+       gst_message_unref (msg);
+       msg = NULL;
+     }
+-    GST_SOURCE_GROUP_UNLOCK (group);
+-  } else if (GST_MESSAGE_TYPE (msg) == GST_MESSAGE_ERROR) {
+-    /* If we get an error of the subtitle uridecodebin transform
+-     * them into warnings and disable the subtitles */
+-    group = playbin->curr_group;
++    GST_SOURCE_GROUP_UNLOCK (group);
++  } else if (GST_MESSAGE_TYPE (msg) == GST_MESSAGE_ERROR) {
++    /* If we get an error of the subtitle uridecodebin transform
++     * them into warnings and disable the subtitles */
++    group = playbin->curr_group;
++#ifdef TCL_PATCH
++    if (group && group->suburiInfoList) {
++      GList *list = group->suburiInfoList;
++      for(; list; list = list->next) {
++        GstSubUriInfo *suburiinfo = (GstSubUriInfo*)list->data;
++        if (suburiinfo && suburiinfo->decodebin &&
++            G_UNLIKELY (gst_object_has_ancestor (msg->src, GST_OBJECT_CAST(suburiinfo->decodebin)))) {
++          GError *err;
++          gchar *debug = NULL;
++          GstMessage *new_msg;
++          GstIterator *it;
++          gboolean done = FALSE;
++          GValue item = { 0, };
++
++          gst_message_parse_error (msg, &err, &debug);
++          new_msg = gst_message_new_warning (msg->src, err, debug);
++
++          gst_message_unref (msg);
++          g_error_free (err);
++          g_free (debug);
++          msg = new_msg;
++
++          REMOVE_SIGNAL (suburiinfo->decodebin, group->sub_pad_added_id);
++          REMOVE_SIGNAL (suburiinfo->decodebin, group->sub_pad_removed_id);
++          REMOVE_SIGNAL (suburiinfo->decodebin, group->sub_no_more_pads_id);
++          REMOVE_SIGNAL (suburiinfo->decodebin, group->sub_autoplug_continue_id);
++          REMOVE_SIGNAL (suburiinfo->decodebin, group->sub_autoplug_query_id);
++
++          it = gst_element_iterate_src_pads (suburiinfo->decodebin);
++          while (it && !done) {
++            GstPad *p = NULL;
++            GstIteratorResult res;
++
++            res = gst_iterator_next (it, &item);
++
++            switch (res) {
++              case GST_ITERATOR_DONE:
++                done = TRUE;
++                break;
++              case GST_ITERATOR_OK:
++                p = g_value_get_object (&item);
++                pad_removed_cb (NULL, p, group);
++                gst_object_unref (p);
++                g_value_reset (&item);
++                break;
++
++              case GST_ITERATOR_RESYNC:
++                gst_iterator_resync (it);
++                break;
++              case GST_ITERATOR_ERROR:
++                done = TRUE;
++                break;
++            }
++          }
++
++          g_value_unset (&item);
++          if (it)
++            gst_iterator_free (it);
++
++          gst_object_ref (suburiinfo->decodebin);
++          gst_bin_remove (bin, suburiinfo->decodebin);
++          gst_element_set_locked_state (suburiinfo->decodebin, FALSE);
++        }
++      }
++
++      //GST_SOURCE_GROUP_LOCK (group);
++      //gst_play_bin_subUriInfoListFree(group);
++      //GST_SOURCE_GROUP_UNLOCK (group);
++
++      if (group->sub_pending) {
++        group->sub_pending = FALSE;
++        no_more_pads_cb (NULL, group);
++      }
++    }
++#endif
+     if (group && group->suburidecodebin) {
+       if (G_UNLIKELY (gst_object_has_as_ancestor (msg->src, GST_OBJECT_CAST
+                   (group->suburidecodebin)))) {
+@@ -3146,9 +3941,13 @@ combiner_active_pad_changed (GObject * combiner, GParamSpec * pspec,
+   switch (combine->type) {
+     case GST_PLAY_SINK_TYPE_VIDEO:
+       property = "current-video";
++#ifdef TCL_PATCH
++      playbin->current_video = get_current_stream_number (playbin,
++          combine, group->video_channels,&(playbin->stream_sequence_map[PLAYBIN_STREAM_VIDEO][0]));
++#else
+       playbin->current_video = get_current_stream_number (playbin,
+           combine, group->video_channels);
+-
++#endif
+       if (playbin->video_pending_flush_finish) {
+         playbin->video_pending_flush_finish = FALSE;
+         GST_PLAY_BIN_UNLOCK (playbin);
+@@ -3159,9 +3958,13 @@ combiner_active_pad_changed (GObject * combiner, GParamSpec * pspec,
+       break;
+     case GST_PLAY_SINK_TYPE_AUDIO:
+       property = "current-audio";
++#ifdef TCL_PATCH
++      playbin->current_audio = get_current_stream_number (playbin,
++          combine, group->audio_channels,&(playbin->stream_sequence_map[PLAYBIN_STREAM_AUDIO][0]));
++#else
+       playbin->current_audio = get_current_stream_number (playbin,
+           combine, group->audio_channels);
+-
++#endif
+       if (playbin->audio_pending_flush_finish) {
+         playbin->audio_pending_flush_finish = FALSE;
+         GST_PLAY_BIN_UNLOCK (playbin);
+@@ -3172,9 +3975,13 @@ combiner_active_pad_changed (GObject * combiner, GParamSpec * pspec,
+       break;
+     case GST_PLAY_SINK_TYPE_TEXT:
+       property = "current-text";
++#ifdef TCL_PATCH
++      playbin->current_text = get_current_stream_number (playbin,
++          combine, group->text_channels,&(playbin->stream_sequence_map[PLAYBIN_STREAM_TEXT][0]));
++#else
+       playbin->current_text = get_current_stream_number (playbin,
+           combine, group->text_channels);
+-
++#endif
+       if (playbin->text_pending_flush_finish) {
+         playbin->text_pending_flush_finish = FALSE;
+         GST_PLAY_BIN_UNLOCK (playbin);
+@@ -3245,7 +4052,20 @@ _uridecodebin_event_probe (GstPad * pad, GstPadProbeInfo * info, gpointer udata)
+   GstPadProbeReturn ret = GST_PAD_PROBE_OK;
+   GstSourceGroup *group = udata;
+   GstEvent *event = GST_PAD_PROBE_INFO_DATA (info);
++#ifdef TCL_PATCH
++  gboolean suburidecodebin = FALSE;
++
++  GList *list = group->suburiInfoList;
++  for(; list; list = list->next) {
++    GstSubUriInfo *suburiinfo = (GstSubUriInfo*)list->data;
++    if (suburiinfo && GST_PAD_PARENT (pad) == suburiinfo->decodebin) {
++      suburidecodebin = TRUE;
++      break;
++    }
++  }
++#else
+   gboolean suburidecodebin = (GST_PAD_PARENT (pad) == group->suburidecodebin);
++#endif
+ 
+   if (suburidecodebin) {
+     /* Drop flushes that we caused from the suburidecodebin */
+@@ -3398,8 +4218,16 @@ pad_added_cb (GstElement * decodebin, GstPad * pad, GstSourceGroup * group)
+   gboolean changed = FALSE;
+   GstElement *custom_combiner = NULL;
+   gulong group_id_probe_handler;
++#ifdef TCL_PATCH
++  gboolean isAudio_combiner = FALSE;
++#endif
+ 
+   playbin = group->playbin;
++#ifdef TCL_PATCH
++  if (playbin->imageplayer){
++    playbin->have_selector = FALSE;
++  }
++#endif
+ 
+   GST_PLAY_BIN_SHUTDOWN_LOCK (playbin, shutdown);
+ 
+@@ -3435,6 +4263,9 @@ pad_added_cb (GstElement * decodebin, GstPad * pad, GstSourceGroup * group)
+     if (combine) {
+       if (i == PLAYBIN_STREAM_AUDIO) {
+         custom_combiner = playbin->audio_stream_combiner;
++#ifdef TCL_PATCH
++        isAudio_combiner = TRUE;
++#endif
+       } else if (i == PLAYBIN_STREAM_TEXT) {
+         custom_combiner = playbin->text_stream_combiner;
+       } else if (i == PLAYBIN_STREAM_VIDEO) {
+@@ -3476,10 +4307,15 @@ pad_added_cb (GstElement * decodebin, GstPad * pad, GstSourceGroup * group)
+       if (!custom_combiner) {
+         /* sync-mode=1, use clock */
+         if (combine->type == GST_PLAY_SINK_TYPE_TEXT)
++#ifdef TCL_PATCH
++          g_object_set (combine->combiner, "sync-streams", TRUE,
++              "sync-mode", 0, "cache-buffers", TRUE, "is-subtitle", TRUE, NULL);
++#else
+           g_object_set (combine->combiner, "sync-streams", TRUE,
+               "sync-mode", 1, "cache-buffers", TRUE, NULL);
+         else
+           g_object_set (combine->combiner, "sync-streams", TRUE, NULL);
++#endif
+       }
+ 
+       if (combine->has_active_pad)
+@@ -3488,6 +4324,11 @@ pad_added_cb (GstElement * decodebin, GstPad * pad, GstSourceGroup * group)
+ 
+       GST_DEBUG_OBJECT (playbin, "adding new stream combiner %p",
+           combine->combiner);
++#ifdef TCL_PATCH
++      if (isAudio_combiner) {
++         g_object_set_data (G_OBJECT (combine->combiner), "isAudioCombiner", (gpointer)"isAudioCombiner");
++      }
++#endif
+       gst_element_set_state (combine->combiner, GST_STATE_PAUSED);
+       gst_bin_add (GST_BIN_CAST (playbin), combine->combiner);
+     }
+@@ -3521,7 +4362,31 @@ pad_added_cb (GstElement * decodebin, GstPad * pad, GstSourceGroup * group)
+ 
+       GST_DEBUG_OBJECT (playbin, "got pad %s:%s from combiner",
+           GST_DEBUG_PAD_NAME (sinkpad));
+-
++#ifdef TCL_PATCH
++      //for audio description, hbbtv1.5
++      GstStructure *structure = gst_caps_get_structure (caps, 0);
++      if (gst_structure_has_field(structure,"audioDescription")) {
++        const gchar* audioDescription = NULL;
++        audioDescription = gst_structure_get_string(structure,"audioDescription");
++        if (0 == strcmp((char *)audioDescription,"main")) {
++          guint sink_index = atoi(GST_OBJECT_NAME(sinkpad)+5);
++          GST_DEBUG_OBJECT (playbin,"inputselect sink index = %d, pad = %s",sink_index, GST_OBJECT_NAME(sinkpad));
++          GstMessage *m = gst_message_new_element(GST_OBJECT_CAST(playbin),
++          gst_structure_new("audio_main_track_index","main_track_index", G_TYPE_UINT, sink_index,NULL));
++          gst_element_post_message(GST_ELEMENT_CAST(playbin),m);
++        }
++      } else if (gst_structure_has_field(structure,"videoDescription")) {
++        const gchar* videoDescription = NULL;
++        videoDescription = gst_structure_get_string(structure,"videoDescription");
++        if (0 == strcmp((char *)videoDescription,"main")) {
++          guint sink_index = atoi(GST_OBJECT_NAME(sinkpad)+5);
++          GST_DEBUG_OBJECT (playbin,"inputselect sink index = %d, pad = %s",sink_index, GST_OBJECT_NAME(sinkpad));
++          GstMessage *m = gst_message_new_element(GST_OBJECT_CAST(playbin),
++          gst_structure_new("video_main_track_index","main_track_index", G_TYPE_UINT, sink_index,NULL));
++          gst_element_post_message(GST_ELEMENT_CAST(playbin),m);
++        }
++      }
++#endif
+       /* find out which properties the sink pad supports */
+       combine->has_always_ok =
+           g_object_class_find_property (G_OBJECT_GET_CLASS (sinkpad),
+@@ -3533,6 +4398,12 @@ pad_added_cb (GstElement * decodebin, GstPad * pad, GstSourceGroup * group)
+       /* store the combiner for the pad */
+       g_object_set_data (G_OBJECT (sinkpad), "playbin.combine", combine);
+ 
++#ifdef TCL_PATCH
++      if (gst_play_bin_subUriDecodeBinIsExist(decodebin,group)) {
++        //g_object_set_data (G_OBJECT (sinkpad), "extern", select);
++        gst_play_bin_subUriInfoList_setSinkPad(decodebin,group,sinkpad);
++      }
++#endif
+       if (combine->has_tags) {
+         gulong notify_tags_handler = 0;
+         NotifyTagsData *ntdata;
+@@ -3611,7 +4482,11 @@ pad_added_cb (GstElement * decodebin, GstPad * pad, GstSourceGroup * group)
+        * For pads from suburidecodebin OK should always be returned, otherwise
+        * it will most likely stop. */
+       if (combine->has_always_ok) {
++#ifdef TCL_PATCH
++        gboolean always_ok = gst_play_bin_subUriDecodeBinIsExist(decodebin,group);
++#else
+         gboolean always_ok = (decodebin == group->suburidecodebin);
++#endif
+         g_object_set (sinkpad, "always-ok", always_ok, NULL);
+       }
+       g_signal_emit (G_OBJECT (playbin), gst_play_bin_signals[signal], 0, NULL);
+@@ -4136,9 +5011,15 @@ avelement_iter_is_equal (GSequenceIter * iter, GstElementFactory * factory)
+   return strcmp (GST_OBJECT_NAME (ave->dec), GST_OBJECT_NAME (factory)) == 0;
+ }
+ 
++#ifdef TCL_PATCH
++static GList *
++create_decoders_list (GList * factory_list, GSequence * avelements,
++    GstPlayFlags flags, gboolean imageplayer)
++#else
+ static GList *
+ create_decoders_list (GList * factory_list, GSequence * avelements,
+     GstPlayFlags flags)
++#endif
+ {
+   GList *dec_list = NULL, *tmp;
+   GList *ave_list = NULL;
+@@ -4150,7 +5031,12 @@ create_decoders_list (GList * factory_list, GSequence * avelements,
+ 
+   for (tmp = factory_list; tmp; tmp = tmp->next) {
+     GstElementFactory *factory = (GstElementFactory *) tmp->data;
+-
++#ifdef TCL_PATCH
++    gchar * name = gst_plugin_feature_get_name ((GstPluginFeature *) factory);
++    if (name && imageplayer && strstr("univsink", name)){
++        continue;
++    }
++#endif
+     /* if there are parsers or sink elements, add them first */
+     if (gst_element_factory_list_is_type (factory,
+             GST_ELEMENT_FACTORY_TYPE_PARSER) ||
+@@ -4292,7 +5178,11 @@ autoplug_factories_cb (GstElement * decodebin, GstPad * pad,
+ 
+     g_mutex_lock (&playbin->elements_lock);
+     /* sort factory_list based on the GstAVElement list priority */
++#ifdef TCL_PATCH
++    factory_list = create_decoders_list (factory_list, *ave_list, flags, playbin->imageplayer);
++#else
+     factory_list = create_decoders_list (factory_list, *ave_list, flags);
++#endif
+     g_mutex_unlock (&playbin->elements_lock);
+   }
+ 
+@@ -4369,6 +5259,37 @@ gst_play_bin_send_event (GstElement * element, GstEvent * event)
+    * event again, and on the second time it will fail in the majority of cases
+    * because the pipeline is still being reconfigured
+    */
++#ifdef TCL_PATCH
++  /* for subtitle,when we seek,the event of flush stop will clean all subtitle item,
++   * so we need to seek to start and get subtitle again */
++  if (GST_EVENT_TYPE(event) == GST_EVENT_SEEK) {
++    GstSourceGroup *group    = NULL;
++    GPtrArray      *channels = NULL;
++
++    group    = get_group (playbin);
++    channels = group->text_channels;
++
++    if (channels && group && playbin->current_text >= 0) {
++      GstPad* sinkpad = g_ptr_array_index (channels,
++              playbin->stream_sequence_map[PLAYBIN_STREAM_TEXT][playbin->current_text]);
++
++      if (sinkpad)  {
++        GstObject *selector = NULL;
++        if ((selector = gst_pad_get_parent (sinkpad)))  {
++          g_object_get (selector, "active-pad", &sinkpad, NULL);
++          gst_object_unref(sinkpad);
++          GstElement* subDecodebin = gst_play_bin_subUriInfoList_getSubdecodebinBySinkpad(sinkpad, group);
++          if (subDecodebin && gst_play_bin_send_custom_event (selector, "playsink-custom-subtitle-flush")) {
++            playbin->text_pending_flush_finish = TRUE;
++            gst_play_bin_suburidecodebin_seek_to_start (group, subDecodebin);
++          }
++          gst_object_unref(selector);
++        }
++      }
++    }
++  }
++#endif
++
+   if (GST_EVENT_IS_UPSTREAM (event)) {
+     return gst_element_send_event (GST_ELEMENT_CAST (playbin->playsink), event);
+   }
+@@ -4583,6 +5504,19 @@ autoplug_continue_cb (GstElement * element, GstPad * pad, GstCaps * caps,
+           GST_OBJECT_CAST (group->suburidecodebin)))
+     goto done;
+ 
++#ifdef TCL_PATCH
++  if (group->suburiInfoList) {
++    GList *list = group->suburiInfoList;
++    for (;list;list = list->next) {
++      GstSubUriInfo *suburiinfo = (GstSubUriInfo*)list->data;
++      if (suburiinfo && suburiinfo->decodebin &&
++          gst_object_has_ancestor (GST_OBJECT_CAST (element), GST_OBJECT_CAST (suburiinfo->decodebin))) {
++        goto done;
++      }
++    }
++  }
++#endif
++
+   if (group->audio_sink &&
+       activate_sink (group->playbin, group->audio_sink, &activated_sink)) {
+ 
+@@ -4830,6 +5764,13 @@ autoplug_select_cb (GstElement * decodebin, GstPad * pad,
+         }
+       }
+     }
++
++#ifdef TCL_PATCH
++    if (ave && ave->sink && strstr(gst_plugin_feature_get_name (GST_PLUGIN_FEATURE (ave->sink)), "uniasink")) {
++      GST_INFO("set playbin->playsink audio softdec false");
++      g_object_set (playbin->playsink, "audio-softdec", FALSE, NULL);
++    }
++#endif
+     g_list_free (ave_list);
+     g_mutex_unlock (&playbin->elements_lock);
+     GST_SOURCE_GROUP_UNLOCK (group);
+@@ -4847,10 +5788,22 @@ autoplug_select_cb (GstElement * decodebin, GstPad * pad,
+     GST_DEBUG_OBJECT (playbin, "we found an audio sink");
+     type = GST_PLAY_SINK_TYPE_AUDIO;
+     sinkp = &group->audio_sink;
++#ifdef TCL_PATCH
++    if (strstr(GST_OBJECT_NAME (factory), "uniasink")) {
++      GST_INFO("set playbin->playsink audio softdec false");
++      g_object_set (playbin->playsink, "audio-softdec", FALSE, NULL);
++    }
++#endif
+   } else if (strstr (klass, "Video")) {
+     GST_DEBUG_OBJECT (playbin, "we found a video sink");
+     type = GST_PLAY_SINK_TYPE_VIDEO;
+     sinkp = &group->video_sink;
++#ifdef TCL_PATCH
++    if (strstr(GST_OBJECT_NAME (factory), "univsink")) {
++      GST_INFO("set playbin->playsink video softdec false");
++      g_object_set (playbin->playsink, "video-softdec", FALSE, NULL);
++    }
++#endif
+   } else {
+     /* unknown klass, skip this element */
+     GST_WARNING_OBJECT (playbin, "unknown sink klass %s found", klass);
+@@ -4980,6 +5933,18 @@ autoplug_query_caps (GstElement * uridecodebin, GstPad * pad,
+       goto done;
+     }
+ 
++#ifdef TCL_PATCH
++    if (group->suburiInfoList) {
++      GList *list = group->suburiInfoList;
++      for (;list;list = list->next) {
++        GstSubUriInfo *suburiinfo = (GstSubUriInfo*)list->data;
++        if(suburiinfo && suburiinfo->decodebin &&
++            gst_object_has_ancestor (GST_OBJECT_CAST (pad), GST_OBJECT_CAST (suburiinfo->decodebin))) {
++          goto done;
++        }
++      }
++    }
++#endif
+     if ((sink = group->video_sink)) {
+       sinkpad = gst_element_get_static_pad (sink, "sink");
+       if (sinkpad) {
+@@ -5010,6 +5975,19 @@ autoplug_query_caps (GstElement * uridecodebin, GstPad * pad,
+       goto done;
+     }
+ 
++#ifdef TCL_PATCH
++    if (group->suburiInfoList) {
++      GList *list = group->suburiInfoList;
++      for (;list;list = list->next) {
++        GstSubUriInfo *suburiinfo = (GstSubUriInfo*)list->data;
++        if (suburiinfo && suburiinfo->decodebin &&
++            gst_object_has_ancestor (GST_OBJECT_CAST (pad), GST_OBJECT_CAST (suburiinfo->decodebin))) {
++          goto done;
++        }
++      }
++    }
++#endif
++
+     if ((sink = group->audio_sink)) {
+       sinkpad = gst_element_get_static_pad (sink, "sink");
+       if (sinkpad) {
+@@ -5176,6 +6154,18 @@ autoplug_query_context (GstElement * uridecodebin, GstPad * pad,
+       goto done;
+     }
+ 
++#ifdef TCL_PATCH
++    if (group->suburiInfoList) {
++      GList *list = group->suburiInfoList;
++      for (;list;list = list->next) {
++        GstSubUriInfo *suburiinfo = (GstSubUriInfo*)list->data;
++        if(suburiinfo && suburiinfo->decodebin &&
++            gst_object_has_ancestor (GST_OBJECT_CAST (pad), GST_OBJECT_CAST (suburiinfo->decodebin))) {
++          goto done;
++        }
++      }
++    }
++#endif
+     if ((sink = group->video_sink)) {
+       sinkpad = gst_element_get_static_pad (sink, "sink");
+       if (sinkpad) {
+@@ -5193,6 +6183,18 @@ autoplug_query_context (GstElement * uridecodebin, GstPad * pad,
+       goto done;
+     }
+ 
++#ifdef TCL_PATCH
++    if (group->suburiInfoList) {
++      GList *list = group->suburiInfoList;
++      for (;list;list = list->next) {
++        GstSubUriInfo *suburiinfo = (GstSubUriInfo*)list->data;
++        if (suburiinfo && suburiinfo->decodebin &&
++            gst_object_has_ancestor (GST_OBJECT_CAST (pad), GST_OBJECT_CAST (suburiinfo->decodebin))) {
++          goto done;
++        }
++      }
++    }
++#endif
+     if ((sink = group->audio_sink)) {
+       sinkpad = gst_element_get_static_pad (sink, "sink");
+       if (sinkpad) {
+@@ -5277,6 +6279,20 @@ group_set_locked_state_unlocked (GstPlayBin * playbin, GstSourceGroup * group,
+   if (group->suburidecodebin)
+     gst_element_set_locked_state (group->suburidecodebin, locked);
+ 
++#ifdef TCL_PATCH
++  if (group->suburiInfoList) {
++    GList* list = group->suburiInfoList;
++    for (;list;list=list->next) {
++      if (list->data) {
++        GstSubUriInfo* suburiInfo = (GstSubUriInfo*)list->data;
++        if (suburiInfo->decodebin) {
++          gst_element_set_locked_state (suburiInfo->decodebin, locked);
++        }
++      }
++    }
++  }
++#endif
++
+   return TRUE;
+ }
+ 
+@@ -5367,6 +6383,10 @@ activate_group (GstPlayBin * playbin, GstSourceGroup * group, GstState target)
+   } else {
+     GST_DEBUG_OBJECT (playbin, "making new uridecodebin");
+     uridecodebin = gst_element_factory_make ("uridecodebin", NULL);
++
++#ifdef TCL_PATCH
++    g_object_set_data (G_OBJECT (uridecodebin),"isMainUridecodebin", (gpointer)"true");
++#endif
+     if (!uridecodebin)
+       goto no_decodebin;
+     gst_bin_add (GST_BIN_CAST (playbin), uridecodebin);
+@@ -5391,6 +6411,16 @@ activate_group (GstPlayBin * playbin, GstSourceGroup * group, GstState target)
+       "buffer-size", playbin->buffer_size,
+       "ring-buffer-max-size", playbin->ring_buffer_max_size, NULL);
+ 
++#ifdef TCL_PATCH
++  if (group->file_fd != -1) {
++    g_object_set (uridecodebin, "file-fd", group->file_fd, NULL);
++    if (group->file_start_offset != 0 && group->file_length != 0) {
++      g_object_set (uridecodebin, "file-start-offset", group->file_start_offset, NULL);
++      g_object_set (uridecodebin, "file-length", group->file_length, NULL);
++    }
++  }
++#endif
++
+   /* connect pads and other things */
+   group->pad_added_id = g_signal_connect (uridecodebin, "pad-added",
+       G_CALLBACK (pad_added_cb), group);
+@@ -5427,6 +6457,113 @@ activate_group (GstPlayBin * playbin, GstSourceGroup * group, GstState target)
+       g_signal_connect (uridecodebin, "autoplug-query",
+       G_CALLBACK (autoplug_query_cb), group);
+ 
++#ifdef TCL_PATCH
++  if (group->suburiInfoList) {
++    GList *list = g_list_last(group->suburiInfoList);
++
++    for (;list;list = list->prev) {
++      GstSubUriInfo *pSuburiInfo = (GstSubUriInfo*)list->data;
++      if (pSuburiInfo) {
++        g_slist_free (pSuburiInfo->suburi_flushes_to_drop);
++        pSuburiInfo->suburi_flushes_to_drop = NULL;
++        if (!pSuburiInfo->suburi_flushes_to_drop_lock.p)
++          g_mutex_init (&pSuburiInfo->suburi_flushes_to_drop_lock);
++
++        if (pSuburiInfo->uri) {
++          if (pSuburiInfo->decodebin) {
++            GST_DEBUG_OBJECT (playbin, "reusing existing suburidecodebin");
++            suburidecodebin = pSuburiInfo->decodebin;
++            gst_element_set_state (suburidecodebin, GST_STATE_READY);
++            gst_bin_add (GST_BIN_CAST (playbin), gst_object_ref (suburidecodebin));
++          } else {
++            GST_DEBUG_OBJECT (playbin, "making new suburidecodebin");
++            suburidecodebin = gst_element_factory_make ("uridecodebin", NULL);
++            if (!suburidecodebin)
++              goto no_decodebin;
++
++            gst_bin_add (GST_BIN_CAST (playbin), suburidecodebin);
++            pSuburiInfo->decodebin = gst_object_ref (suburidecodebin);
++          }
++
++          g_object_set (suburidecodebin,
++              /* configure connection speed */
++              "connection-speed", playbin->connection_speed,
++              /* configure uri */
++              "uri", pSuburiInfo->uri, NULL);
++
++          if (pSuburiInfo->file_fd != -1) {
++              g_object_set (suburidecodebin, "file-fd", pSuburiInfo->file_fd, NULL);
++          }
++
++          /* connect pads and other things */
++          pSuburiInfo->sub_pad_added_id = g_signal_connect (suburidecodebin, "pad-added",
++              G_CALLBACK (pad_added_cb), group);
++          pSuburiInfo->sub_pad_removed_id = g_signal_connect (suburidecodebin,
++              "pad-removed", G_CALLBACK (pad_removed_cb), group);
++          pSuburiInfo->sub_no_more_pads_id = g_signal_connect (suburidecodebin,
++              "no-more-pads", G_CALLBACK (no_more_pads_cb), group);
++
++          pSuburiInfo->sub_autoplug_continue_id =
++              g_signal_connect (suburidecodebin, "autoplug-continue",
++              G_CALLBACK (autoplug_continue_cb), group);
++
++          group->sub_autoplug_query_id =
++              g_signal_connect (suburidecodebin, "autoplug-query",
++              G_CALLBACK (autoplug_query_cb), group);
++
++          /* we have 2 pending no-more-pads */
++          group->pending ++;
++          group->sub_pending = TRUE;
++        } else {
++          group->sub_pending = FALSE;
++        }
++
++      }
++    }
++
++    /* release the group lock before setting the state of the decodebins, they
++    * might fire signals in this thread that we need to handle with the
++    * group_lock taken. */
++    GST_SOURCE_GROUP_UNLOCK (group);
++
++    for (list=group->suburiInfoList; list; list=list->next) {
++      if (list->data) {
++        GstSubUriInfo *pSuburiInfo = (GstSubUriInfo*)list->data;
++
++        if (pSuburiInfo->decodebin) {
++          if (gst_element_set_state (pSuburiInfo->decodebin,
++                  target) == GST_STATE_CHANGE_FAILURE) {
++            GST_DEBUG_OBJECT (playbin,
++                "failed state change of subtitle uridecodebin");
++            GST_SOURCE_GROUP_LOCK (group);
++
++            REMOVE_SIGNAL (pSuburiInfo->decodebin, pSuburiInfo->sub_pad_added_id);
++            REMOVE_SIGNAL (pSuburiInfo->decodebin, pSuburiInfo->sub_pad_removed_id);
++            REMOVE_SIGNAL (pSuburiInfo->decodebin, pSuburiInfo->sub_no_more_pads_id);
++            REMOVE_SIGNAL (pSuburiInfo->decodebin, pSuburiInfo->sub_autoplug_continue_id);
++            REMOVE_SIGNAL (group->suburidecodebin, group->sub_autoplug_query_id);
++
++            /* Might already be removed because of an error message */
++            if (GST_OBJECT_PARENT (pSuburiInfo->decodebin) == GST_OBJECT_CAST (playbin))
++              gst_bin_remove (GST_BIN_CAST (playbin), pSuburiInfo->decodebin);
++            if (group->sub_pending) {
++              group->pending--;
++              group->sub_pending = FALSE;
++            }
++
++            gst_element_set_state (pSuburiInfo->decodebin, GST_STATE_READY);
++            GST_SOURCE_GROUP_UNLOCK (group);
++          }
++        }
++      }
++    }
++  } else  {
++    GST_SOURCE_GROUP_UNLOCK (group);
++  }
++
++  if ((state_ret = gst_element_set_state (uridecodebin, target)) == GST_STATE_CHANGE_FAILURE)
++    goto uridecodebin_failure;
++#else
+   if (group->suburi) {
+     /* subtitles */
+     if (group->suburidecodebin) {
+@@ -5510,7 +6647,7 @@ activate_group (GstPlayBin * playbin, GstSourceGroup * group, GstState target)
+           gst_element_set_state (uridecodebin,
+               target)) == GST_STATE_CHANGE_FAILURE)
+     goto uridecodebin_failure;
+-
++#endif
+   GST_SOURCE_GROUP_LOCK (group);
+   /* allow state changes of the playbin affect the group elements now */
+   group_set_locked_state_unlocked (playbin, group, FALSE);
+@@ -5679,6 +6816,28 @@ deactivate_group (GstPlayBin * playbin, GstSourceGroup * group)
+     gst_bin_remove (GST_BIN_CAST (playbin), group->uridecodebin);
+   }
+ 
++#ifdef TCL_PATCH
++  if (group->suburiInfoList) {
++    GList* list = group->suburiInfoList;
++    for(;list;list=list->next) {
++      if (list->data) {
++        GstSubUriInfo* suburiInfo = (GstSubUriInfo*)list->data;
++        if (suburiInfo->decodebin) {
++          REMOVE_SIGNAL (suburiInfo->decodebin, suburiInfo->sub_pad_added_id);
++          REMOVE_SIGNAL (suburiInfo->decodebin, suburiInfo->sub_pad_removed_id);
++          REMOVE_SIGNAL (suburiInfo->decodebin, suburiInfo->sub_no_more_pads_id);
++          REMOVE_SIGNAL (suburiInfo->decodebin, suburiInfo->sub_autoplug_continue_id);
++          REMOVE_SIGNAL (suburiInfo->decodebin, suburiInfo->sub_autoplug_query_id);
++
++          /* Might already be removed because of errors */
++          if (GST_OBJECT_PARENT (suburiInfo->decodebin) == GST_OBJECT_CAST (playbin))
++            gst_bin_remove (GST_BIN_CAST (playbin), suburiInfo->decodebin);
++        }
++      }
++    }
++  }
++#endif
++
+   if (group->suburidecodebin) {
+     REMOVE_SIGNAL (group->suburidecodebin, group->sub_pad_added_id);
+     REMOVE_SIGNAL (group->suburidecodebin, group->sub_pad_removed_id);
+@@ -5816,6 +6975,22 @@ gst_play_bin_change_state (GstElement * element, GstStateChange transition)
+   switch (transition) {
+     case GST_STATE_CHANGE_NULL_TO_READY:
+       memset (&playbin->duration, 0, sizeof (playbin->duration));
++
++#ifdef TCL_PATCH
++      /* add sink */
++      playbin->playsink =
++          g_object_new (GST_TYPE_PLAY_SINK, "name", "playsink", "send-event-mode",
++          1, NULL);
++      gst_bin_add (GST_BIN_CAST (playbin), GST_ELEMENT_CAST (playbin->playsink));
++      gst_play_sink_set_flags (playbin->playsink, DEFAULT_FLAGS);
++      /* Connect to notify::volume and notify::mute signals for proxying */
++      g_signal_connect (playbin->playsink, "notify::volume",
++          G_CALLBACK (notify_volume_cb), playbin);
++      g_signal_connect (playbin->playsink, "notify::mute",
++          G_CALLBACK (notify_mute_cb), playbin);
++      g_signal_connect (playbin->playsink, "value-changed",
++          G_CALLBACK (colorbalance_value_changed_cb), playbin);
++#endif
+       break;
+     case GST_STATE_CHANGE_READY_TO_PAUSED:
+       GST_LOG_OBJECT (playbin, "clearing shutdown flag");
+@@ -5901,6 +7076,22 @@ gst_play_bin_change_state (GstElement * element, GstStateChange transition)
+           playbin->groups[i].uridecodebin = NULL;
+         }
+ 
++#ifdef TCL_PATCH
++        if (playbin->groups[i].suburiInfoList) {
++          GList* list = playbin->groups[i].suburiInfoList;
++          for (;list;list=list->next) {
++            if (list->data) {
++              GstSubUriInfo* suburiInfo = (GstSubUriInfo*)list->data;
++              if (suburiInfo->decodebin) {
++                gst_element_set_state (suburiInfo->decodebin,GST_STATE_NULL);
++                gst_object_unref (suburiInfo->decodebin);
++                suburiInfo->decodebin = NULL;
++              }
++            }
++          }
++        }
++#endif
++
+         if (playbin->groups[i].suburidecodebin) {
+           gst_element_set_state (playbin->groups[i].suburidecodebin,
+               GST_STATE_NULL);
+@@ -6105,3 +7296,218 @@ gst_play_bin_colorbalance_init (gpointer g_iface, gpointer g_iface_data)
+   iface->get_value = gst_play_bin_colorbalance_get_value;
+   iface->get_balance_type = gst_play_bin_colorbalance_get_balance_type;
+ }
++
++#ifdef TCL_PATCH
++static gboolean
++gst_play_bin_subUriInfoList_setSinkPad(GstElement* decodebin,GstSourceGroup * group, GstPad* sinkPad)
++{
++  GList* suburiInfoList = NULL;
++
++  if (group == NULL || decodebin == NULL || sinkPad == NULL) {
++    return FALSE;
++  }
++
++  suburiInfoList = group->suburiInfoList;
++
++  for (;suburiInfoList;suburiInfoList = suburiInfoList->next) {
++    if (suburiInfoList->data != NULL) {
++      GstSubUriInfo* pSuburiInfo = (GstSubUriInfo*)suburiInfoList->data;
++      if (pSuburiInfo->decodebin == decodebin) {
++        pSuburiInfo->sinkpad = sinkPad;
++        return TRUE;
++      }
++    }
++  }
++
++  return FALSE;
++}
++
++static gboolean
++gst_play_bin_subUriInfoListFree(GstSourceGroup * group)
++{
++  GList* suburiInfoList = NULL;
++
++  if (group == NULL)
++    return FALSE;
++
++  suburiInfoList = group->suburiInfoList;
++
++  for (;suburiInfoList;suburiInfoList = suburiInfoList->next) {
++    GstSubUriInfo* pSuburiInfo = (GstSubUriInfo*)suburiInfoList->data;
++    if (pSuburiInfo) {
++      if (pSuburiInfo->uri != NULL) {
++        g_free(pSuburiInfo->uri);
++        pSuburiInfo->uri = NULL;
++      }
++
++      if (pSuburiInfo->decodebin) {
++        gst_object_unref (pSuburiInfo->decodebin);
++        pSuburiInfo->decodebin = NULL;
++      }
++
++      g_slist_free (pSuburiInfo->suburi_flushes_to_drop);
++      pSuburiInfo->suburi_flushes_to_drop = NULL;
++
++      if (pSuburiInfo->suburi_flushes_to_drop_lock.p)
++        g_mutex_clear (&pSuburiInfo->suburi_flushes_to_drop_lock);
++
++      pSuburiInfo->suburi_flushes_to_drop_lock.p = NULL;
++
++      pSuburiInfo->sinkpad = NULL;
++      g_free(pSuburiInfo);
++      pSuburiInfo = NULL;
++    }
++    pSuburiInfo = NULL;
++  }
++
++  if (group->suburiInfoList)
++    g_list_free(group->suburiInfoList);
++
++  group->suburiInfoList = NULL;
++
++  return TRUE;
++}
++
++static gboolean
++gst_play_bin_subUriIsExist(gchar* suburi, GstSourceGroup * group)
++{
++  gboolean ret = FALSE;
++  GList* suburiInfoList = NULL;
++
++  if (suburi == NULL || group == NULL) {
++    goto done;
++  }
++
++  suburiInfoList = group->suburiInfoList;
++
++  if (suburiInfoList == NULL) {
++    goto done;
++  }
++
++  for (;suburiInfoList;suburiInfoList = suburiInfoList->next) {
++    if (suburiInfoList->data != NULL) {
++      GstSubUriInfo* pSuburiInfo = (GstSubUriInfo*)suburiInfoList->data;
++      if (pSuburiInfo->uri != NULL && strcmp(pSuburiInfo->uri,suburi) == 0) {
++        ret = TRUE;
++        goto done;
++      }
++    }
++  }
++
++  done:
++    return ret;
++}
++
++static gboolean
++gst_play_bin_subUriInfoListAddSuburi(const gchar* uri,GstSourceGroup * group)
++{
++  gchar* suburi = NULL;
++
++  if (uri == NULL ||  group == NULL) {
++   return FALSE;
++  }
++
++  suburi = g_strdup(uri);
++
++  if (gst_play_bin_subUriIsExist(suburi,group)) {
++    return TRUE;
++  } else {
++    GstSubUriInfo* pSuburiInfo = (GstSubUriInfo*)g_malloc(sizeof(GstSubUriInfo));
++    if (pSuburiInfo == NULL) {
++      return FALSE;
++    }
++
++    memset(pSuburiInfo,0,sizeof(GstSubUriInfo));
++    pSuburiInfo->file_fd = -1;
++    pSuburiInfo->uri = suburi;
++
++    group->suburiInfoList = g_list_append(group->suburiInfoList, pSuburiInfo);
++  }
++
++  return TRUE;
++}
++
++
++
++static gboolean
++gst_play_bin_subUriDecodeBinIsExist(GstElement* decodebin,GstSourceGroup * group)
++{
++  gboolean ret = FALSE;
++  GList* suburiInfoList = NULL;
++
++  if (decodebin == NULL || group == NULL) {
++    goto done;
++  }
++
++  suburiInfoList = group->suburiInfoList;
++
++  if (suburiInfoList == NULL) {
++    goto done;
++  }
++
++  for (;suburiInfoList;suburiInfoList = suburiInfoList->next) {
++    if (suburiInfoList->data != NULL) {
++      GstSubUriInfo* pSuburiInfo = (GstSubUriInfo*)suburiInfoList->data;
++      if (pSuburiInfo->decodebin == decodebin) {
++        ret = TRUE;
++        goto done;
++      }
++    }
++  }
++
++  done:
++    return ret;
++}
++
++static GstElement* gst_play_bin_subUriInfoList_getSubdecodebinBySinkpad(GstPad *sinkPad, GstSourceGroup * group)
++{
++  GList* suburiInfoList = NULL;
++
++  if (sinkPad == NULL || group == NULL) {
++    return NULL;
++  }
++
++  suburiInfoList = group->suburiInfoList;
++
++  if (suburiInfoList == NULL) {
++    return NULL;
++  }
++
++  for (;suburiInfoList;suburiInfoList = suburiInfoList->next) {
++    if (suburiInfoList->data != NULL) {
++      GstSubUriInfo* pSuburiInfo = (GstSubUriInfo*)suburiInfoList->data;
++      if (pSuburiInfo->sinkpad == sinkPad) {
++        return pSuburiInfo->decodebin;
++      }
++    }
++  }
++
++  return NULL;
++}
++
++static GstSubUriInfo* gst_play_bin_subUriInfoList_getSuburiInfo(GstElement* decodebin,GstSourceGroup * group)
++{
++  GList* suburiInfoList = NULL;
++
++  if (decodebin == NULL || group == NULL) {
++    return NULL;
++  }
++
++  suburiInfoList = group->suburiInfoList;
++
++  if (suburiInfoList == NULL) {
++    return NULL;
++  }
++
++  for (;suburiInfoList;suburiInfoList = suburiInfoList->next) {
++    if (suburiInfoList->data != NULL) {
++      GstSubUriInfo* pSuburiInfo = (GstSubUriInfo*)suburiInfoList->data;
++      if (pSuburiInfo->decodebin == decodebin) {
++        return pSuburiInfo;
++      }
++    }
++  }
++
++  return NULL;
++}
++#endif
+diff --git a/subprojects/gst-plugins-base/gst/playback/gstplaysink.c b/subprojects/gst-plugins-base/gst/playback/gstplaysink.c
+index 5ea6d9e088..9974dac0de 100644
+--- a/subprojects/gst-plugins-base/gst/playback/gstplaysink.c
++++ b/subprojects/gst-plugins-base/gst/playback/gstplaysink.c
+@@ -47,6 +47,11 @@ GST_DEBUG_CATEGORY_STATIC (gst_play_sink_debug);
+ #define DEFAULT_FLAGS             GST_PLAY_FLAG_AUDIO | GST_PLAY_FLAG_VIDEO | GST_PLAY_FLAG_TEXT | \
+                                   GST_PLAY_FLAG_SOFT_VOLUME | GST_PLAY_FLAG_SOFT_COLORBALANCE
+ 
++#ifdef TCL_PATCH
++#define DEFAULT_FLAGS_HARDDEC     GST_PLAY_FLAG_AUDIO | GST_PLAY_FLAG_VIDEO | GST_PLAY_FLAG_TEXT | \
++                                  GST_PLAY_FLAG_NATIVE_AUDIO | GST_PLAY_FLAG_NATIVE_VIDEO
++#endif
++
+ #define GST_PLAY_CHAIN(c) ((GstPlayChain *)(c))
+ 
+ /* enum types */
+@@ -291,6 +296,14 @@ struct _GstPlaySink
+   gboolean text_custom_flush_finished;
+   gboolean text_ignore_wrong_state;
+   gboolean text_pending_flush;
++
++#ifdef TCL_PATCH
++  gboolean softdec;
++  gboolean video_softdec;
++  gboolean audio_softdec;
++  gboolean imageplayer;
++  gboolean use_converters;
++#endif
+ };
+ 
+ struct _GstPlaySinkClass
+@@ -350,7 +363,18 @@ enum
+   PROP_SEND_EVENT_MODE,
+   PROP_FORCE_ASPECT_RATIO,
+   PROP_VIDEO_FILTER,
+-  PROP_AUDIO_FILTER
++  PROP_AUDIO_FILTER,
++
++#ifdef TCL_PATCH
++  PROP_SOFTDEC,
++  PROP_IMAGE_PLAY,
++  PROP_USE_CONV,
++  PROP_VIDEO_SOFTDEC,
++  PROP_AUDIO_SOFTDEC,
++
++  PROP_AUDIO_QUEUE,
++  PROP_VIDEO_QUEUE
++#endif
+ };
+ 
+ /* signals */
+@@ -387,11 +411,13 @@ static gboolean gst_play_sink_audio_sink_event (GstPad * pad, GstEvent * event);
+ static GstFlowReturn gst_play_sink_audio_sink_chain (GstPad * pad,
+     GstBuffer * buffer);
+ #endif
++
++#ifndef TCL_PATCH
+ static gboolean gst_play_sink_text_sink_event (GstPad * pad, GstObject * parent,
+     GstEvent * event);
+ static GstFlowReturn gst_play_sink_text_sink_chain (GstPad * pad,
+     GstObject * parent, GstBuffer * buffer);
+-
++#endif
+ static void notify_volume_cb (GObject * object, GParamSpec * pspec,
+     GstPlaySink * playsink);
+ static void notify_mute_cb (GObject * object, GParamSpec * pspec,
+@@ -622,6 +648,41 @@ gst_play_sink_class_init (GstPlaySinkClass * klass)
+           "When enabled, scaling will respect original aspect ratio", TRUE,
+           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+ 
++#ifdef TCL_PATCH
++  g_object_class_install_property (gobject_klass, PROP_SOFTDEC,
++         g_param_spec_boolean ("softdec", "Soft Decoder",
++             "when TURE,use video and audio soft decoder,don't use mediacodec",FALSE,
++             G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_klass, PROP_IMAGE_PLAY,
++         g_param_spec_boolean ("imageplayer", "Image Player",
++             "when TURE,image player pipeline",FALSE,
++             G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_klass, PROP_USE_CONV,
++         g_param_spec_boolean ("use-conv", "use conv",
++             "when TURE,use conv",TRUE,
++             G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_klass, PROP_VIDEO_SOFTDEC,
++        g_param_spec_boolean ("video-softdec", "Video Soft Decoder",
++            "when TURE,use video soft decoder,don't use mediacodec",FALSE,
++            G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++  g_object_class_install_property (gobject_klass, PROP_AUDIO_SOFTDEC,
++        g_param_spec_boolean ("audio-softdec", "Audio Soft Decoder",
++            "when TURE,use audio soft decoder,don't use mediacodec",FALSE,
++            G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_klass, PROP_AUDIO_QUEUE,
++      g_param_spec_object ("aqueue", "Audio queue",
++          "the audio queue to apply, if possible",
++          GST_TYPE_ELEMENT, G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_klass, PROP_VIDEO_QUEUE,
++      g_param_spec_object ("vqueue", "video queue",
++          "the video queue to apply, if possible",
++          GST_TYPE_ELEMENT, G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
++#endif
+   g_signal_new ("reconfigure", G_TYPE_FROM_CLASS (klass),
+       G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, G_STRUCT_OFFSET (GstPlaySinkClass,
+           reconfigure), NULL, NULL, NULL, G_TYPE_BOOLEAN, 0, G_TYPE_NONE);
+@@ -696,7 +757,13 @@ gst_play_sink_init (GstPlaySink * playsink)
+   playsink->flags = DEFAULT_FLAGS;
+   playsink->send_event_mode = MODE_DEFAULT;
+   playsink->force_aspect_ratio = TRUE;
+-
++#ifdef TCL_PATCH
++  playsink->video_softdec = TRUE;
++  playsink->audio_softdec = TRUE;
++  playsink->softdec = TRUE;
++  playsink->imageplayer = FALSE;
++  playsink->use_converters = TRUE;
++#endif
+   playsink->stream_synchronizer =
+       g_object_new (GST_TYPE_STREAM_SYNCHRONIZER, NULL);
+   gst_bin_add (GST_BIN_CAST (playsink),
+@@ -1182,6 +1249,38 @@ gst_play_sink_get_vis_plugin (GstPlaySink * playsink)
+   return result;
+ }
+ 
++#ifdef TCL_PATCH
++static GstElement *
++gst_play_sink_get_vqueue_plugin (GstPlaySink * playsink)
++{
++  GstElement *result = NULL;
++  GstPlayVisChain *chain;
++
++  GST_PLAY_SINK_LOCK (playsink);
++  if ((chain = (GstPlayVisChain *) playsink->videochain)) {
++      result = gst_object_ref(chain->queue);
++  }
++  GST_PLAY_SINK_UNLOCK (playsink);
++
++  return result;
++}
++
++static GstElement *
++gst_play_sink_get_aqueue_plugin (GstPlaySink * playsink)
++{
++  GstElement *result = NULL;
++  GstPlayVisChain *chain;
++
++  GST_PLAY_SINK_LOCK (playsink);
++  if ((chain = (GstPlayVisChain *) playsink->audiochain)) {
++      result = gst_object_ref(chain->queue);
++  }
++  GST_PLAY_SINK_UNLOCK (playsink);
++
++  return result;
++}
++#endif
++
+ void
+ gst_play_sink_set_volume (GstPlaySink * playsink, gdouble volume)
+ {
+@@ -1906,6 +2005,11 @@ gen_video_chain (GstPlaySink * playsink, gboolean raw, gboolean async)
+         (_("Missing element '%s' - check your GStreamer installation."),
+             "queue"), ("video rendering might be suboptimal"));
+   } else {
++#ifdef TCL_PATCH
++    if (!playsink->video_softdec)
++      g_object_set (G_OBJECT (chain->queue), "silent", TRUE, NULL);
++    else
++#endif
+     g_object_set (G_OBJECT (chain->queue), "max-size-buffers", 3,
+         "max-size-bytes", 0, "max-size-time", (gint64) 0, "silent", TRUE, NULL);
+     gst_bin_add (bin, chain->queue);
+@@ -1934,10 +2038,23 @@ gen_video_chain (GstPlaySink * playsink, gboolean raw, gboolean async)
+   }
+   GST_OBJECT_UNLOCK (playsink);
+ 
++#ifdef TCL_PATCH
++  if (playsink->video_softdec &&
++        (!(playsink->flags & GST_PLAY_FLAG_NATIVE_VIDEO)
++            || (!playsink->colorbalance_element
++                && (playsink->flags & GST_PLAY_FLAG_SOFT_COLORBALANCE)))) {
++#else
+   if (!(playsink->flags & GST_PLAY_FLAG_NATIVE_VIDEO)
+       || (!playsink->colorbalance_element
+           && (playsink->flags & GST_PLAY_FLAG_SOFT_COLORBALANCE))) {
++#endif
++
+     gboolean use_converters = !(playsink->flags & GST_PLAY_FLAG_NATIVE_VIDEO);
++#ifdef TCL_PATCH
++    if (playsink->imageplayer){
++        use_converters = playsink->use_converters;
++    }
++#endif
+     gboolean use_balance = !playsink->colorbalance_element
+         && (playsink->flags & GST_PLAY_FLAG_SOFT_COLORBALANCE);
+ 
+@@ -2165,6 +2282,7 @@ setup_video_chain (GstPlaySink * playsink, gboolean raw, gboolean async)
+   return TRUE;
+ }
+ 
++#ifndef TCL_PATCH
+ static gboolean
+ gst_play_sink_sink_event (GstPad * pad, GstObject * parent, GstEvent * event,
+     const gchar * sink_type,
+@@ -2434,6 +2552,7 @@ out:
+   gst_event_unref (event);
+   return ret;
+ }
++#endif
+ 
+ /* make an element for playback of video with subtitles embedded.
+  * Only used for *raw* video streams.
+@@ -2455,7 +2574,7 @@ gen_text_chain (GstPlaySink * playsink)
+   GstPlayTextChain *chain;
+   GstBin *bin;
+   GstElement *elem;
+-  GstPad *videosinkpad, *textsinkpad, *srcpad;
++  GstPad *videosinkpad, *textsinkpad;
+ 
+   chain = g_new0 (GstPlayTextChain, 1);
+   chain->chain.playsink = playsink;
+@@ -2466,7 +2585,7 @@ gen_text_chain (GstPlaySink * playsink)
+   bin = GST_BIN_CAST (chain->chain.bin);
+   gst_object_ref_sink (bin);
+ 
+-  videosinkpad = textsinkpad = srcpad = NULL;
++  videosinkpad = textsinkpad = NULL;
+ 
+   /* first try to hook the text pad to the custom sink */
+   if (playsink->text_sink) {
+@@ -2490,9 +2609,13 @@ gen_text_chain (GstPlaySink * playsink)
+               (_("Missing element '%s' - check your GStreamer installation."),
+                   "queue"), ("rendering might be suboptimal"));
+         } else {
++#ifdef TCL_PATCH
++          g_object_set (G_OBJECT (chain->queue),"silent", TRUE, NULL);
++#else
+           g_object_set (G_OBJECT (chain->queue), "max-size-buffers", 3,
+               "max-size-bytes", 0, "max-size-time", (gint64) GST_SECOND,
+               "silent", TRUE, NULL);
++#endif
+           gst_bin_add (bin, chain->queue);
+         }
+         /* we have a custom sink, this will be our textsinkpad */
+@@ -2529,6 +2652,83 @@ gen_text_chain (GstPlaySink * playsink)
+     }
+   }
+ 
++#ifdef TCL_PATCH
++  else {
++    if (chain->sink == NULL) {
++      GST_DEBUG_OBJECT (playsink, "trying unitsink");
++      elem = gst_element_factory_make ("unitsink", "textsink");
++      chain->sink = try_element (playsink, elem, TRUE);
++      GST_DEBUG_OBJECT (playsink, "create element %s",
++        GST_ELEMENT_NAME (chain->sink));
++    }
++    if (chain->sink)
++      playsink->text_sink = gst_object_ref (chain->sink);
++
++    gst_bin_add (bin, chain->sink);
++    GST_DEBUG_OBJECT (playsink, "add sink to bin");
++  }
++
++  if (textsinkpad == NULL) {
++    chain->overlay =
++        gst_element_factory_make ("subtitleoverlay", "suboverlay");
++    if (chain->overlay == NULL) {
++      post_missing_element_message (playsink, "subtitleoverlay");
++      GST_ELEMENT_WARNING (playsink, CORE, MISSING_PLUGIN,
++          (_("Missing element '%s' - check your GStreamer installation."),
++              "subtitleoverlay"), ("subtitle rendering disabled"));
++    } else {
++      GstElement *element;
++      gst_bin_add (bin, chain->overlay);
++      g_object_set (G_OBJECT (chain->overlay), "silent", FALSE, NULL);
++      if (playsink->font_desc) {
++        g_object_set (G_OBJECT (chain->overlay), "font-desc",
++            playsink->font_desc, NULL);
++      }
++      if (playsink->subtitle_encoding) {
++        g_object_set (G_OBJECT (chain->overlay), "subtitle-encoding",
++            playsink->subtitle_encoding, NULL);
++      }
++
++      /* make another little queue to decouple streams */
++      element = gst_element_factory_make ("queue", "subqueue");
++      chain->queue = element;
++
++      if (element == NULL) {
++        post_missing_element_message (playsink, "queue");
++        GST_ELEMENT_WARNING (playsink, CORE, MISSING_PLUGIN,
++            (_("Missing element '%s' - check your GStreamer installation."),
++                "queue"), ("rendering might be suboptimal"));
++      } else {
++        g_object_set (G_OBJECT (element), "silent", TRUE, NULL);
++        gst_bin_add (bin, element);
++        if (gst_element_link_pads_full (element, "src", chain->overlay,
++                "subtitle_sink", GST_PAD_LINK_CHECK_TEMPLATE_CAPS)) {
++          textsinkpad = gst_element_get_static_pad (element, "sink");
++        } else {
++          gst_bin_remove (bin, chain->sink);
++          gst_bin_remove (bin, chain->overlay);
++          chain->sink = NULL;
++          chain->overlay = NULL;
++        }
++      }
++    }
++  }
++
++  /* expose the ghostpads */
++  if (textsinkpad) {
++    chain->textsinkpad = gst_ghost_pad_new ("text_sink", textsinkpad);
++    gst_object_unref (textsinkpad);
++    gst_element_add_pad (chain->chain.bin, chain->textsinkpad);
++  }
++
++  if (chain->overlay) {
++    GST_DEBUG_OBJECT (playsink, "linking to sink");
++    if (!gst_element_link_pads_full (chain->overlay, "src", chain->sink, NULL,
++            GST_PAD_LINK_CHECK_TEMPLATE_CAPS))
++      GST_ERROR_OBJECT (playsink, "linking to sink fail!!!");
++  }
++#else
++  GstPad *srcpad = NULL;
+   if (textsinkpad == NULL) {
+     if (!(playsink->flags & GST_PLAY_FLAG_NATIVE_VIDEO)) {
+       /* make a little queue */
+@@ -2645,7 +2845,7 @@ gen_text_chain (GstPlaySink * playsink)
+ 
+     gst_element_add_pad (chain->chain.bin, chain->srcpad);
+   }
+-
++#endif
+   return chain;
+ }
+ 
+@@ -2709,7 +2909,11 @@ gen_audio_chain (GstPlaySink * playsink, gboolean raw)
+     /* only try fallback if no specific sink was chosen */
+     if (chain->sink == NULL) {
+       GST_DEBUG_OBJECT (playsink, "trying autoaudiosink");
++#ifdef TCL_PATCH
++      elem = gst_element_factory_make ("uniasink", "audiosink");
++#else
+       elem = gst_element_factory_make ("autoaudiosink", "audiosink");
++#endif
+       chain->sink = try_element (playsink, elem, TRUE);
+     }
+     if (chain->sink == NULL) {
+@@ -2789,6 +2993,11 @@ gen_audio_chain (GstPlaySink * playsink, gboolean raw)
+         (_("Missing element '%s' - check your GStreamer installation."),
+             "queue"), ("audio playback and visualizations might not work"));
+   } else {
++#ifdef TCL_PATCH
++    if (!playsink->audio_softdec)
++      g_object_set (chain->queue, "silent", TRUE, "max-size-buffers", 10, NULL);
++    else
++#endif
+     g_object_set (chain->queue, "silent", TRUE, NULL);
+     gst_bin_add (bin, chain->queue);
+     if (prev) {
+@@ -2844,8 +3053,14 @@ gen_audio_chain (GstPlaySink * playsink, gboolean raw)
+     chain->sink_volume = FALSE;
+   }
+ 
++#ifdef TCL_PATCH
++  if (playsink->audio_softdec &&
++        (!(playsink->flags & GST_PLAY_FLAG_NATIVE_AUDIO) || (!have_volume
++            && (playsink->flags & GST_PLAY_FLAG_SOFT_VOLUME)))) {
++#else
+   if (!(playsink->flags & GST_PLAY_FLAG_NATIVE_AUDIO) || (!have_volume
+           && (playsink->flags & GST_PLAY_FLAG_SOFT_VOLUME))) {
++#endif
+     gboolean use_converters = !(playsink->flags & GST_PLAY_FLAG_NATIVE_AUDIO);
+     gboolean use_volume =
+         !have_volume && (playsink->flags & GST_PLAY_FLAG_SOFT_VOLUME);
+@@ -2887,6 +3102,24 @@ gen_audio_chain (GstPlaySink * playsink, gboolean raw)
+     }
+   }
+ 
++#ifdef TCL_PATCH
++  else if (!playsink->audio_softdec && raw) {
++    GST_DEBUG_OBJECT (playsink,
++        "creating audioconvert with use-converters");
++    chain->conv =
++        g_object_new (GST_TYPE_PLAY_SINK_AUDIO_CONVERT, "name", "aconv",
++        "use-converters", TRUE, NULL);
++    gst_bin_add (bin, chain->conv);
++    if (prev) {
++      if (!gst_element_link_pads_full (prev, "src", chain->conv, "sink",
++              GST_PAD_LINK_CHECK_TEMPLATE_CAPS))
++        goto link_failed;
++    } else {
++      head = chain->conv;
++    }
++    prev = chain->conv;
++  }
++#endif
+   if (prev) {
+     /* we only have to link to the previous element if we have something in
+      * front of the sink */
+@@ -3227,6 +3460,7 @@ gst_play_sink_do_reconfigure (GstPlaySink * playsink)
+   GST_OBJECT_LOCK (playsink);
+   /* get flags, there are protected with the object lock */
+   flags = playsink->flags;
++  GST_INFO("flags = %d", flags);
+   GST_OBJECT_UNLOCK (playsink);
+ 
+   /* figure out which components we need */
+@@ -3247,6 +3481,15 @@ gst_play_sink_do_reconfigure (GstPlaySink * playsink)
+         playsink->audio_pad_raw);
+   }
+ 
++#ifdef TCL_PATCH
++  if (playsink->audio_pad_raw) {
++    playsink->audio_softdec = FALSE;
++    if (playsink->video_softdec == FALSE && playsink->softdec != FALSE) {
++      playsink->softdec = FALSE;
++      flags = playsink->flags = DEFAULT_FLAGS_HARDDEC;
++    }
++  }
++#endif
+ 
+   if (((flags & GST_PLAY_FLAG_VIDEO)
+           || (flags & GST_PLAY_FLAG_NATIVE_VIDEO)) && playsink->video_pad) {
+@@ -3269,14 +3512,34 @@ gst_play_sink_do_reconfigure (GstPlaySink * playsink)
+       if (flags & GST_PLAY_FLAG_VIS && !need_video) {
+         /* also add video when we add visualisation */
+         need_video = TRUE;
++        /* if slotdec is false，flags don’t include GST_PLAY_FLAG_VIS,*/
++        /* so need_vis Always be FALSE*/
+         need_vis = TRUE;
+       }
+     }
+   }
++  GST_INFO("need_audio = %d, need_video = %d, need_deinterlace = %d, need_vis = %d, need_text = %d",
++            need_audio, need_video, need_deinterlace, need_vis, need_text);
++
++#ifdef TCL_PATCH
++    if ((!playsink->video_softdec && !need_audio) || (!playsink->audio_softdec && !need_video)) {
++        playsink->softdec = FALSE;
++    }
++
++    if ((!playsink->softdec || playsink->imageplayer) && playsink->stream_synchronizer) {
++      gst_bin_remove(GST_BIN_CAST (playsink),
++          GST_ELEMENT_CAST (playsink->stream_synchronizer));
++      playsink->stream_synchronizer = NULL;
++    }
++#endif
+ 
+   /* we have a text_pad and we need text rendering, in this case we need a
+    * video_pad to combine the video with the text or visualizations */
++#ifdef TCL_PATCH
++  if (playsink->video_softdec && need_text && !need_video && !playsink->text_sink) {
++#else
+   if (need_text && !need_video && !playsink->text_sink) {
++#endif
+     if (playsink->video_pad) {
+       need_video = TRUE;
+     } else if (need_audio) {
+@@ -3285,11 +3548,13 @@ gst_play_sink_do_reconfigure (GstPlaySink * playsink)
+           ("Have text pad but no video pad or visualizations"));
+       need_text = FALSE;
+     } else {
++#ifndef TCL_PATCH
+       GST_ELEMENT_ERROR (playsink, STREAM, FORMAT,
+           (_("Can't play a text file without video or visualizations.")),
+           ("Have text pad but no video pad or visualizations"));
+       GST_PLAY_SINK_UNLOCK (playsink);
+       return FALSE;
++#endif
+     }
+   }
+ 
+@@ -3371,8 +3636,11 @@ gst_play_sink_do_reconfigure (GstPlaySink * playsink)
+       playsink->videochain = gen_video_chain (playsink, raw, async);
+     if (!playsink->videochain)
+       goto no_chain;
+-
++#ifdef TCL_PATCH
++   if (playsink->softdec && !playsink->video_sinkpad_stream_synchronizer && !playsink->imageplayer) {
++#else
+     if (!playsink->video_sinkpad_stream_synchronizer) {
++#endif
+       GValue item = { 0, };
+       GstIterator *it;
+ 
+@@ -3388,8 +3656,11 @@ gst_play_sink_do_reconfigure (GstPlaySink * playsink)
+       g_assert (playsink->video_srcpad_stream_synchronizer);
+       gst_iterator_free (it);
+     }
+-
++#ifdef TCL_PATCH
++    if (playsink->softdec && playsink->video_pad && playsink->video_sinkpad_stream_synchronizer)
++#else
+     if (playsink->video_pad)
++#endif
+       gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (playsink->video_pad),
+           playsink->video_sinkpad_stream_synchronizer);
+ 
+@@ -3407,10 +3678,21 @@ gst_play_sink_do_reconfigure (GstPlaySink * playsink)
+       add_chain (GST_PLAY_CHAIN (playsink->videodeinterlacechain), TRUE);
+       activate_chain (GST_PLAY_CHAIN (playsink->videodeinterlacechain), TRUE);
+ 
++#ifdef TCL_PATCH
++      if (!playsink->softdec || playsink->imageplayer) {
++        gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (playsink->video_pad),
++            playsink->videodeinterlacechain->sinkpad);
++      } else {
++#endif
+       gst_pad_unlink (playsink->video_srcpad_stream_synchronizer,
+           playsink->videochain->sinkpad);
++
+       gst_pad_link_full (playsink->video_srcpad_stream_synchronizer,
+           playsink->videodeinterlacechain->sinkpad, GST_PAD_LINK_CHECK_NOTHING);
++
++#ifdef TCL_PATCH
++      }
++#endif
+     } else {
+       if (playsink->videodeinterlacechain) {
+         add_chain (GST_PLAY_CHAIN (playsink->videodeinterlacechain), FALSE);
+@@ -3425,16 +3707,43 @@ gst_play_sink_do_reconfigure (GstPlaySink * playsink)
+     /* if we are not part of vis or subtitles, set the ghostpad target */
+     if (!need_vis && !need_text && (!playsink->textchain
+             || !playsink->text_pad)) {
++#ifdef TCL_PATCH
++      if (!playsink->softdec) {
++        GST_DEBUG_OBJECT (playsink, "ghosting video sinkpad");
++        if (playsink->videodeinterlacechain
++            && playsink->videodeinterlacechain->srcpad)
++        gst_pad_unlink (playsink->videodeinterlacechain->srcpad,
++            playsink->videochain->sinkpad);
++        if (need_deinterlace)
++          gst_pad_link_full (playsink->videodeinterlacechain->srcpad,
++              playsink->videochain->sinkpad, GST_PAD_LINK_CHECK_NOTHING);
++        else
++          gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (playsink->video_pad),
++              playsink->videochain->sinkpad);
++
++      } else {
++#endif
++
+       GstPad *old_sink_peer = gst_pad_get_peer (playsink->videochain->sinkpad);
+       GstPad *new_peer = NULL;
+-
+       GST_DEBUG_OBJECT (playsink, "ghosting video sinkpad");
++
++#ifdef TCL_PATCH
++     if (playsink->imageplayer && !need_deinterlace){
++         gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (playsink->video_pad),playsink->videochain->sinkpad);
++      }
++#endif
++
+       if (need_deinterlace)
+         new_peer = playsink->videodeinterlacechain->srcpad;
+       else
+         new_peer = playsink->video_srcpad_stream_synchronizer;
+ 
++#ifdef TCL_PATCH
++      if (old_sink_peer != new_peer && new_peer != NULL) {
++#else
+       if (old_sink_peer != new_peer) {
++#endif
+         /* Make sure the srcpad we're linking to is unlinked. This may
+          * leave a deinterlace or text overlay unlinked and lying around,
+          * but that will be cleaned up below */
+@@ -3462,6 +3771,9 @@ gst_play_sink_do_reconfigure (GstPlaySink * playsink)
+       }
+ 
+       gst_clear_object (&old_sink_peer);
++#ifdef TCL_PATCH
++      }
++#endif
+     }
+   } else {
+     GST_DEBUG_OBJECT (playsink, "no video needed");
+@@ -3607,8 +3919,11 @@ gst_play_sink_do_reconfigure (GstPlaySink * playsink)
+ 
+     if (!playsink->audiochain)
+       goto no_chain;
+-
++#ifdef TCL_PATCH
++    if (playsink->softdec && !playsink->audio_sinkpad_stream_synchronizer) {
++#else
+     if (!playsink->audio_sinkpad_stream_synchronizer) {
++#endif
+       GValue item = { 0, };
+       GstIterator *it;
+ 
+@@ -3663,6 +3978,27 @@ gst_play_sink_do_reconfigure (GstPlaySink * playsink)
+     }
+ 
+     if (playsink->audiochain) {
++#ifdef TCL_PATCH
++      if (!playsink->softdec) {
++        GST_DEBUG_OBJECT (playsink, "adding audio chain");
++        gboolean ret_ghost;
++        add_chain (GST_PLAY_CHAIN (playsink->audiochain), TRUE);
++        activate_chain (GST_PLAY_CHAIN (playsink->audiochain), TRUE);
++        if (playsink->audio_pad)
++          ret_ghost = gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (playsink->audio_pad),
++            playsink->audiochain->sinkpad);
++      } else if (!playsink->audio_softdec) {
++        GST_DEBUG_OBJECT (playsink, "adding audio chain");
++        add_chain (GST_PLAY_CHAIN (playsink->audiochain), TRUE);
++        activate_chain (GST_PLAY_CHAIN (playsink->audiochain), TRUE);
++        if (playsink->audio_pad) {
++          gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (playsink->audio_pad),
++            playsink->audio_sinkpad_stream_synchronizer);
++        }
++        gst_pad_link_full (playsink->audio_srcpad_stream_synchronizer,
++            playsink->audiochain->sinkpad, GST_PAD_LINK_CHECK_NOTHING);
++      } else {
++#endif
+       GstPad *sinkpad;
+ 
+       GST_DEBUG_OBJECT (playsink, "adding audio chain");
+@@ -3681,6 +4017,9 @@ gst_play_sink_do_reconfigure (GstPlaySink * playsink)
+           GST_PAD_LINK_CHECK_NOTHING);
+       gst_pad_link_full (playsink->audio_srcpad_stream_synchronizer,
+           playsink->audiochain->sinkpad, GST_PAD_LINK_CHECK_NOTHING);
++#ifdef TCL_PATCH
++      }
++#endif
+     }
+   } else {
+     GST_DEBUG_OBJECT (playsink, "no audio needed");
+@@ -3817,8 +4156,11 @@ gst_play_sink_do_reconfigure (GstPlaySink * playsink)
+         g_object_set (G_OBJECT (playsink->textchain->overlay), "silent", FALSE,
+             NULL);
+       add_chain (GST_PLAY_CHAIN (playsink->textchain), TRUE);
+-
++#ifdef TCL_PATCH
++      if (playsink->softdec && !playsink->text_sinkpad_stream_synchronizer) {
++#else
+       if (!playsink->text_sinkpad_stream_synchronizer) {
++#endif
+         GValue item = { 0, };
+ 
+         playsink->text_sinkpad_stream_synchronizer =
+@@ -3833,11 +4175,16 @@ gst_play_sink_do_reconfigure (GstPlaySink * playsink)
+         g_assert (playsink->text_srcpad_stream_synchronizer);
+         gst_iterator_free (it);
+       }
+-
++#ifdef TCL_PATCH
++      if (playsink->softdec) {
++#endif
+       gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (playsink->text_pad),
+           playsink->text_sinkpad_stream_synchronizer);
+       gst_pad_link_full (playsink->text_srcpad_stream_synchronizer,
+           playsink->textchain->textsinkpad, GST_PAD_LINK_CHECK_NOTHING);
++#ifdef TCL_PATCH
++      }
++#endif
+ 
+       if (need_vis || need_video) {
+         if (need_vis) {
+@@ -3856,17 +4203,44 @@ gst_play_sink_do_reconfigure (GstPlaySink * playsink)
+             gst_pad_link_full (playsink->videodeinterlacechain->srcpad,
+                 playsink->textchain->videosinkpad, GST_PAD_LINK_CHECK_NOTHING);
+           } else {
++#ifdef TCL_PATCH
++            if (!playsink->softdec) {
++              gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (playsink->video_pad),
++                  playsink->videochain->sinkpad);
++            } else if (playsink->softdec && !playsink->video_softdec) {
++              gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (playsink->video_pad),
++                  playsink->video_sinkpad_stream_synchronizer);
++              gst_pad_link_full (playsink->video_srcpad_stream_synchronizer,
++                  playsink->videochain->sinkpad, GST_PAD_LINK_CHECK_NOTHING);
++            } else {
++#endif
+             gst_pad_unlink (playsink->video_srcpad_stream_synchronizer,
+                 playsink->videochain->sinkpad);
+             gst_pad_link_full (playsink->video_srcpad_stream_synchronizer,
+                 playsink->textchain->videosinkpad, GST_PAD_LINK_CHECK_NOTHING);
++#ifdef TCL_PATCH
++            }
++#endif
+           }
+         }
+-        gst_pad_link_full (playsink->textchain->srcpad,
+-            playsink->videochain->sinkpad, GST_PAD_LINK_CHECK_NOTHING);
++
++#ifdef TCL_PATCH
++        if (playsink->video_softdec) {
++#endif
++          gst_pad_link_full (playsink->textchain->srcpad,
++              playsink->videochain->sinkpad, GST_PAD_LINK_CHECK_NOTHING);
++#ifdef TCL_PATCH
++        }
++#endif
+       }
+ 
+       activate_chain (GST_PLAY_CHAIN (playsink->textchain), TRUE);
++#ifdef TCL_PATCH
++      if (!playsink->softdec) {
++        gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (playsink->text_pad),
++          playsink->textchain->textsinkpad);
++      }
++#endif
+     }
+   } else {
+     GST_DEBUG_OBJECT (playsink, "no text needed");
+@@ -3955,7 +4329,16 @@ gst_play_sink_set_flags (GstPlaySink * playsink, GstPlayFlags flags)
+   g_return_val_if_fail (GST_IS_PLAY_SINK (playsink), FALSE);
+ 
+   GST_OBJECT_LOCK (playsink);
++#ifdef TCL_PATCH
++  GST_INFO("flags = %d,softdec = %d", flags, playsink->softdec);
++  if (playsink->softdec) {
++    playsink->flags = flags;
++  } else {
++    playsink->flags = DEFAULT_FLAGS_HARDDEC;
++  }
++#else
+   playsink->flags = flags;
++#endif
+   GST_OBJECT_UNLOCK (playsink);
+ 
+   return TRUE;
+@@ -4476,6 +4859,16 @@ caps_notify_cb (GstPad * pad, GParamSpec * unused, GstPlaySink * playsink)
+     raw = is_raw_pad (pad);
+     reconfigure = (! !playsink->video_pad_raw != ! !raw)
+         && playsink->videochain;
++#ifdef TCL_PATCH
++    GstVideoInfo info;
++    if (gst_video_info_from_caps (&info, caps)) {
++        if (info.fps_d > 0 && info.fps_n != 0)     {
++          GstPlayTextChain* chain = (GstPlayTextChain*)playsink->textchain;
++          if (chain && chain->overlay)
++            g_object_set(chain->overlay, "video-fps", info.fps_n, info.fps_d, NULL);
++        }
++    }
++#endif
+     GST_DEBUG_OBJECT (pad,
+         "Video caps changed: raw %d reconfigure %d caps %" GST_PTR_FORMAT, raw,
+         reconfigure, caps);
+@@ -4563,6 +4956,21 @@ gst_play_sink_request_pad (GstPlaySink * playsink, GstPlaySinkType type)
+   switch (type) {
+     case GST_PLAY_SINK_TYPE_AUDIO:
+       pad_name = "audio_sink";
++#ifdef TCL_PATCH
++      if (!playsink->softdec || !playsink->audio_softdec) {
++        /*no tee:if no need, don't add tee plugin*/
++        pad_name = "audio_sink";
++        if (!playsink->audio_pad) {
++          GST_LOG_OBJECT (playsink, "ghosting  audiosink");
++          playsink->audio_pad =
++              gst_ghost_pad_new_no_target (pad_name, GST_PAD_SINK);
++          playsink->audio_notify_caps_id =
++              g_signal_connect (G_OBJECT (playsink->audio_pad), "notify::caps",
++              G_CALLBACK (caps_notify_cb), playsink);
++          created = TRUE;
++        }
++      } else {
++#endif
+       if (!playsink->audio_tee) {
+         GST_LOG_OBJECT (playsink, "creating tee");
+         /* create tee when needed. This element will feed the audio sink chain
+@@ -4590,6 +4998,9 @@ gst_play_sink_request_pad (GstPlaySink * playsink, GstPlaySinkType type)
+             G_CALLBACK (caps_notify_cb), playsink);
+         created = TRUE;
+       }
++#ifdef TCL_PATCH
++      }
++#endif
+       playsink->audio_pad_raw = FALSE;
+       res = playsink->audio_pad;
+       block_id = &playsink->audio_block_id;
+@@ -5260,6 +5671,84 @@ gst_play_sink_set_property (GObject * object, guint prop_id,
+       GST_PLAY_SINK_UNLOCK (playsink);
+       break;
+     }
++#ifdef TCL_PATCH
++    case PROP_SOFTDEC:
++    {
++      gboolean softdec = g_value_get_boolean (value);
++      GST_INFO("set PROP_SOFTDEC softdec = %d", softdec);
++      GST_PLAY_SINK_LOCK (playsink);
++      if (playsink->softdec != softdec) {
++          playsink->softdec = softdec;
++          if (playsink->softdec == FALSE) {
++            playsink->flags = DEFAULT_FLAGS_HARDDEC;
++          }
++      }
++      GST_PLAY_SINK_UNLOCK (playsink);
++      break;
++    }
++    case PROP_IMAGE_PLAY:
++    {
++      gboolean imageplayer = g_value_get_boolean (value);
++      GST_INFO("set PROP_IMAGE_PLAY imageplayer = %d", imageplayer);
++      GST_PLAY_SINK_LOCK (playsink);
++      playsink->imageplayer = imageplayer;
++      if ((playsink->imageplayer) && playsink->stream_synchronizer) {
++          gst_bin_remove(GST_BIN_CAST (playsink), GST_ELEMENT_CAST (playsink->stream_synchronizer));
++          playsink->stream_synchronizer = NULL;
++      }
++      GST_PLAY_SINK_UNLOCK (playsink);
++      break;
++    }
++    case PROP_USE_CONV:
++    {
++      gboolean conv = g_value_get_boolean (value);
++      GST_INFO("set PROP_USE_CONV = %d", conv);
++      GST_PLAY_SINK_LOCK (playsink);
++      playsink->use_converters = conv;
++      GST_PLAY_SINK_UNLOCK (playsink);
++      break;
++    }
++    case PROP_VIDEO_SOFTDEC:
++    {
++      gboolean video_softdec = g_value_get_boolean (value);
++      GST_INFO("set PROP_VIDEO_SOFTDEC video_softdec = %d", video_softdec);
++      GST_PLAY_SINK_LOCK (playsink);
++      if (playsink->video_softdec != video_softdec) {
++        playsink->video_softdec = video_softdec;
++        if (playsink->video_softdec == FALSE &&
++            playsink->audio_softdec == FALSE &&
++            playsink->softdec != FALSE) {
++
++          playsink->softdec = FALSE;
++          playsink->flags = DEFAULT_FLAGS_HARDDEC;
++        }
++      }
++      GST_PLAY_SINK_UNLOCK (playsink);
++      break;
++    }
++    case PROP_AUDIO_SOFTDEC:
++    {
++      gboolean audio_softdec = g_value_get_boolean (value);
++      GST_INFO("set PROP_AUDIO_SOFTDEC audio_softdec = %d", audio_softdec);
++      GST_PLAY_SINK_LOCK (playsink);
++      if (playsink->audio_softdec != audio_softdec) {
++        playsink->audio_softdec = audio_softdec;
++        if (playsink->video_softdec == FALSE &&
++            playsink->audio_softdec == FALSE &&
++            playsink->softdec != FALSE) {
++
++          playsink->softdec = FALSE;
++          playsink->flags = DEFAULT_FLAGS_HARDDEC;
++        }
++      }
++      GST_PLAY_SINK_UNLOCK (playsink);
++      break;
++    }
++    case PROP_AUDIO_QUEUE:
++      break;
++    case PROP_VIDEO_QUEUE:
++      break;
++#endif
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, spec);
+       break;
+@@ -5326,6 +5815,29 @@ gst_play_sink_get_property (GObject * object, guint prop_id,
+     case PROP_FORCE_ASPECT_RATIO:
+       g_value_set_boolean (value, playsink->force_aspect_ratio);
+       break;
++#ifdef TCL_PATCH
++    case PROP_SOFTDEC:
++      g_value_set_boolean (value, playsink->softdec);
++      break;
++    case PROP_IMAGE_PLAY:
++     g_value_set_boolean (value, playsink->imageplayer);
++     break;
++    case PROP_USE_CONV:
++      g_value_set_boolean (value, playsink->use_converters);
++      break;
++     case PROP_VIDEO_SOFTDEC:
++      g_value_set_boolean (value, playsink->video_softdec);
++      break;
++     case PROP_AUDIO_SOFTDEC:
++      g_value_set_boolean (value, playsink->audio_softdec);
++      break;
++     case PROP_AUDIO_QUEUE:
++      g_value_take_object (value, gst_play_sink_get_aqueue_plugin (playsink));
++      break;
++     case PROP_VIDEO_QUEUE:
++      g_value_take_object (value, gst_play_sink_get_vqueue_plugin (playsink));
++      break;
++#endif
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, spec);
+       break;
+@@ -5598,3 +6110,147 @@ gst_play_sink_colorbalance_init (gpointer g_iface, gpointer g_iface_data)
+   iface->get_value = gst_play_sink_colorbalance_get_value;
+   iface->get_balance_type = gst_play_sink_colorbalance_get_balance_type;
+ }
++
++#ifdef TCL_PATCH
++void
++gst_play_sink_get_sub_status(GstPlaySink * playsink, gboolean *visible)
++{
++  if (visible && playsink) {
++    gboolean silent = FALSE;
++    GstPlayTextChain *chain;
++    GST_PLAY_SINK_LOCK (playsink);
++    chain = (GstPlayTextChain *) playsink->textchain;
++
++    if (chain && chain->overlay)  {
++      g_object_get (chain->overlay, "silent", &silent, NULL);
++      *visible = silent?FALSE:TRUE;
++      GST_WARNING("silent = %d", silent);
++    }
++
++    GST_PLAY_SINK_UNLOCK (playsink);
++  }
++}
++
++
++void
++gst_play_sink_set_sub_status(GstPlaySink * playsink,gboolean visible)
++{
++  gboolean openIt = visible;
++  if (playsink && openIt && playsink->text_pad) {
++  /* we have subtitles and we are requested to show it */
++    openIt = TRUE;
++  } else {
++    openIt = FALSE;
++  }
++  gboolean silent = openIt?FALSE:TRUE;
++
++
++  GstPlayTextChain *chain;
++  GST_PLAY_SINK_LOCK (playsink);
++  chain = (GstPlayTextChain *) playsink->textchain;
++  if (chain && chain->overlay)  {
++    g_object_set (chain->overlay, "silent", silent, NULL);
++  }
++
++  GST_PLAY_SINK_UNLOCK (playsink);
++}
++
++void
++gst_play_sink_set_av_syncdone(GstPlaySink *playsink)
++{
++  GstPlayTextChain *chain;
++  GST_PLAY_SINK_LOCK (playsink);
++  chain = (GstPlayTextChain *) playsink->textchain;
++  if (chain && chain->overlay)  {
++    if (g_object_class_find_property (G_OBJECT_GET_CLASS (chain->overlay), "avsyncdone"))
++      g_object_set (chain->overlay, "avsyncdone", TRUE, NULL);
++  }
++  GST_PLAY_SINK_UNLOCK (playsink);
++}
++
++void
++gst_play_sink_set_av_syncdone_not_need(GstPlaySink *playsink)
++{
++  GstPlayTextChain *chain;
++  GST_PLAY_SINK_LOCK (playsink);
++  chain = (GstPlayTextChain *) playsink->textchain;
++  if (chain && chain->overlay)  {
++    if (g_object_class_find_property (G_OBJECT_GET_CLASS (chain->overlay), "av-syncdone-notneed"))
++      g_object_set (chain->overlay, "av-syncdone-notneed", TRUE, NULL);
++  }
++  GST_PLAY_SINK_UNLOCK (playsink);
++}
++
++void
++gst_play_sink_set_av_sync_update(GstPlaySink *playsink, gpointer info)
++{
++  GstPlayTextChain *chain;
++  GST_PLAY_SINK_LOCK (playsink);
++  chain = (GstPlayTextChain *) playsink->textchain;
++  if (chain && chain->overlay)  {
++    if (g_object_class_find_property (G_OBJECT_GET_CLASS (chain->overlay), "avsync-update")) {
++      g_object_set (chain->overlay, "avsync-update", info, NULL);
++    }
++  }
++  GST_PLAY_SINK_UNLOCK (playsink);
++}
++
++void
++gst_play_sink_set_video_decoder_id(GstPlaySink *playsink, gpointer id)
++{
++  GstPlayTextChain *chain;
++  GST_PLAY_SINK_LOCK (playsink);
++  chain = (GstPlayTextChain *) playsink->textchain;
++  if (chain && chain->overlay)  {
++    if (g_object_class_find_property (G_OBJECT_GET_CLASS (chain->overlay), "video-decoder-id")) {
++      g_object_set (chain->overlay, "video-decoder-id", id, NULL);
++    }
++  }
++  GST_PLAY_SINK_UNLOCK (playsink);
++}
++
++void
++gst_play_sink_set_sub_surface(GstPlaySink *playsink, gpointer surface)
++{
++  GstPlayTextChain *chain;
++  GST_PLAY_SINK_LOCK (playsink);
++  chain = (GstPlayTextChain *) playsink->textchain;
++  if (chain && chain->overlay)  {
++    if (g_object_class_find_property (G_OBJECT_GET_CLASS (chain->overlay), "sub-surface")) {
++      g_object_set (chain->overlay, "sub-surface", surface, NULL);
++    }
++  }
++  GST_PLAY_SINK_UNLOCK (playsink);
++}
++
++void
++gst_play_sink_set_sub_user_set(GstPlaySink *playsink, gpointer set)
++{
++  GstPlayTextChain *chain;
++  GST_PLAY_SINK_LOCK (playsink);
++  chain = (GstPlayTextChain *) playsink->textchain;
++  if (chain && chain->overlay &&
++      g_object_class_find_property (G_OBJECT_GET_CLASS (chain->overlay), "sub-user-set")) {
++    g_object_set (chain->overlay, "sub-user-set", set, NULL);
++  }
++  GST_PLAY_SINK_UNLOCK (playsink);
++}
++
++gboolean
++gst_play_sink_sub_type_is_text       (GstPlaySink *playsink)
++{
++  gboolean result = TRUE;       // default is text
++  GstPlayTextChain *chain;
++
++  GST_PLAY_SINK_LOCK (playsink);
++  chain = (GstPlayTextChain *) playsink->textchain;
++  if (chain && chain->overlay) {
++    g_object_get (chain->overlay, "sub-type-is-text", &result, NULL);
++  }
++  GST_PLAY_SINK_UNLOCK (playsink);
++
++  return result;
++}
++
++#endif
++
+diff --git a/subprojects/gst-plugins-base/gst/playback/gstplaysink.h b/subprojects/gst-plugins-base/gst/playback/gstplaysink.h
+index b3a3d8f9ae..c18782e50b 100644
+--- a/subprojects/gst-plugins-base/gst/playback/gstplaysink.h
++++ b/subprojects/gst-plugins-base/gst/playback/gstplaysink.h
+@@ -101,6 +101,26 @@ GstSample *      gst_play_sink_convert_sample  (GstPlaySink * playsink, GstCaps
+ 
+ gboolean         gst_play_sink_reconfigure    (GstPlaySink * playsink);
+ 
++#ifdef TCL_PATCH
++void             gst_play_sink_set_sub_status   (GstPlaySink * playsink,gboolean isOpen);
++
++void             gst_play_sink_get_sub_status  (GstPlaySink * playsink, gboolean *visible);
++
++void             gst_play_sink_set_av_syncdone(GstPlaySink * playsink);
++
++void             gst_play_sink_set_av_syncdone_not_need(GstPlaySink *playsink);
++
++void             gst_play_sink_set_av_sync_update(GstPlaySink *playsink, gpointer info);
++
++void             gst_play_sink_set_video_decoder_id(GstPlaySink *playsink, gpointer id);
++
++void             gst_play_sink_set_sub_surface(GstPlaySink *playsink, gpointer surface);
++
++void             gst_play_sink_set_sub_user_set(GstPlaySink *playsink, gpointer set);
++
++gboolean         gst_play_sink_sub_type_is_text       (GstPlaySink *playsink);
++
++#endif
+ G_END_DECLS
+ 
+ #endif /* __GST_PLAY_SINK_H__ */
+diff --git a/subprojects/gst-plugins-base/gst/playback/gstsubtitleoverlay.c b/subprojects/gst-plugins-base/gst/playback/gstsubtitleoverlay.c
+index f57cbd4ca9..5f5f256cc6 100644
+--- a/subprojects/gst-plugins-base/gst/playback/gstsubtitleoverlay.c
++++ b/subprojects/gst-plugins-base/gst/playback/gstsubtitleoverlay.c
+@@ -60,11 +60,13 @@ static GstStaticPadTemplate srctemplate = GST_STATIC_PAD_TEMPLATE ("src",
+     GST_PAD_ALWAYS,
+     GST_STATIC_CAPS_ANY);
+ 
++#ifndef TCL_PATCH
+ static GstStaticPadTemplate video_sinktemplate =
+ GST_STATIC_PAD_TEMPLATE ("video_sink",
+     GST_PAD_SINK,
+     GST_PAD_ALWAYS,
+     GST_STATIC_CAPS_ANY);
++#endif
+ 
+ static GstStaticPadTemplate subtitle_sinktemplate =
+ GST_STATIC_PAD_TEMPLATE ("subtitle_sink",
+@@ -72,15 +74,43 @@ GST_STATIC_PAD_TEMPLATE ("subtitle_sink",
+     GST_PAD_ALWAYS,
+     GST_STATIC_CAPS_ANY);
+ 
++// TODO: 可继续优化和缩减
++/** 1.去除passthrough，   直接让subtitleoverlay的sinkpad unref Buf
++ *  2.去除handle_message，直接让subtitleoverlay的sinkpad unref Buf，在切换字幕时重构
++ */
+ enum
+ {
+   PROP_0,
+-  PROP_SILENT,
++  PROP_SILENT,                      /* 控制字幕开关         */
+   PROP_FONT_DESC,
+-  PROP_SUBTITLE_ENCODING,
+-  PROP_SUBTITLE_TS_OFFSET
++  PROP_SUBTITLE_ENCODING,           /* 设置文本字幕编码     */
++  PROP_SUBTITLE_TS_OFFSET,
++
++#ifdef TCL_PATCH
++  PROP_AV_SYNCDONE,                 /* 通知AV_SYNCDONE      */
++  PROP_AV_SYNCDONE_NOTNEED,         /* 区分seek和换track    */
++  PROP_AV_SYNC_UPDATE,              /* 单播字幕时下发时间   */
++  PROP_VIDEO_DECODER_ID,            /* 告之VideoDecoderID   */
++  PROP_SUBTITLE_DEBUG,              /* 控制开启Debug模式    */
++  PROP_VIDEOFPS,                    /* 特殊文本字幕需要FPS  */
++  PROP_SUB_SURFACE,                 /* 用于显示字幕得surface*/
++  PROP_SUB_USER_SET,                /* 用户设置的字幕显示的大小，颜色，位置等*/
++#endif
++
++#ifdef TCL_PATCH
++  PROP_SUB_TYPE_IS_TEXT,            /* 获取字幕的类型为文本或图片*/
++#endif
+ };
+ 
++#ifdef TCL_PATCH
++typedef enum
++{
++    SUBTITLE_PLUGIN_TYPE_RENDER,    /* Render型字幕插件 */
++    SUBTITLE_PLUGIN_TYPE_PARSER,    /* Parser型字幕插件 */
++    SUBTITLE_PLUGIN_TYPE_OTHER      /* 非字幕类插件     */
++}SUBTITLE_PLUGIN_TYPE;
++#endif
++
+ #define gst_subtitle_overlay_parent_class parent_class
+ G_DEFINE_TYPE (GstSubtitleOverlay, gst_subtitle_overlay, GST_TYPE_BIN);
+ 
+@@ -207,6 +237,64 @@ gst_subtitle_overlay_finalize (GObject * object)
+   G_OBJECT_CLASS (parent_class)->finalize (object);
+ }
+ 
++#ifdef TCL_PATCH
++static SUBTITLE_PLUGIN_TYPE
++_element_subtitle_type(GstElementFactory* factory)
++{
++  const gchar* klass = gst_element_factory_get_metadata(factory, GST_ELEMENT_METADATA_KLASS);
++  if (klass) {
++    if (strstr(klass, "Parser/Subtitle"))
++      return SUBTITLE_PLUGIN_TYPE_PARSER;
++    if (strstr(klass, "Overlay/Subtitle"))
++      return SUBTITLE_PLUGIN_TYPE_RENDER;
++  }
++  return SUBTITLE_PLUGIN_TYPE_OTHER;
++}
++
++static GstCaps *
++_get_sub_caps (GstElementFactory * factory)
++{
++  const GList *templates;
++  GList *walk;
++
++  templates = gst_element_factory_get_static_pad_templates (factory);
++  for (walk = (GList *) templates; walk; walk = g_list_next (walk)) {
++    GstStaticPadTemplate *templ = walk->data;
++
++    if (templ->direction == GST_PAD_SINK &&
++        templ->presence == GST_PAD_ALWAYS &&
++        SUBTITLE_PLUGIN_TYPE_OTHER != _element_subtitle_type(factory)) {
++      return gst_static_caps_get (&templ->static_caps);
++    }
++  }
++  return NULL;
++}
++
++static gboolean
++_factory_filter(GstPluginFeature* feature, GstCaps** subcaps)
++{
++  GstElementFactory*   factory     = GST_ELEMENT_FACTORY_CAST(feature);
++  SUBTITLE_PLUGIN_TYPE plugin_type = SUBTITLE_PLUGIN_TYPE_OTHER;
++  /* 去除非ELEMENT及RANK低于GST_RANK_PRIMARY的插件---字幕插件均满足优先级不低于GST_RANK_PRIMARY */
++  if (!GST_IS_ELEMENT_FACTORY(feature) ||
++      gst_plugin_feature_get_rank(feature) < GST_RANK_PRIMARY)
++    return FALSE;
++
++  plugin_type = _element_subtitle_type(factory);
++  /* 去除非插件类 */
++  if(SUBTITLE_PLUGIN_TYPE_OTHER == plugin_type)
++    return FALSE;
++  else {
++    GstCaps* templ_caps = _get_sub_caps(factory);
++    if (G_LIKELY(templ_caps)) {
++      *subcaps = gst_caps_merge(*subcaps, templ_caps);
++      return TRUE;
++    }
++  }
++  return FALSE;
++}
++
++#else
+ static gboolean
+ _is_renderer (GstElementFactory * factory)
+ {
+@@ -390,6 +478,7 @@ _factory_filter (GstPluginFeature * feature, GstCaps ** subcaps)
+     return FALSE;
+   }
+ }
++#endif
+ 
+ /* Call with factories_lock! */
+ static gboolean
+@@ -462,6 +551,10 @@ check_factory_for_caps (GstElementFactory * factory, const GstCaps * caps)
+   GstCaps *fcaps = _get_sub_caps (factory);
+   gboolean ret = (fcaps) ? gst_caps_is_subset (caps, fcaps) : FALSE;
+ 
++  //GST_ERROR("fcaps: %" GST_PTR_FORMAT, fcaps);
++  //GST_ERROR("caps: %" GST_PTR_FORMAT, caps);
++  //GST_ERROR("ret = %d", ret);
++
+   if (fcaps)
+     gst_caps_unref (fcaps);
+ 
+@@ -509,6 +602,49 @@ _sort_by_ranks (GstPluginFeature * f1, GstPluginFeature * f2)
+   return diff;
+ }
+ 
++#ifdef TCL_PATCH
++static GList*
++gst_subtitle_overlay_get_factories_for_subparse(const GList* list, const GstCaps* caps)
++{
++  GList* result            = NULL;
++  GstElementFactory*  ef   = NULL;
++  const GstStructure* structure = gst_caps_get_structure(caps, 0);
++  if(structure) {
++    /* 可继续拓展--写死 */
++    if (strcmp(gst_structure_get_name(structure), "application/ttml+xml") == 0) {
++        ef = gst_element_factory_find("ttmlsuboverlay");
++    } else if(strcmp(gst_structure_get_name(structure), "application/x-subtitle-vtt") == 0) {
++        ef = gst_element_factory_find("wvttsuboverlay");
++    } else if(strcmp(gst_structure_get_name(structure), "application/x-subtitle") == 0) {
++        const GValue *value = NULL;
++        if ((value = gst_structure_get_value (structure, "codec"))) {
++            const gchar *codec = NULL;
++            codec = g_value_get_string (value);
++            if (strcmp(codec, "IdxVobSub") == 0) {
++                ef = gst_element_factory_find("dvdsuboverlay");
++            } else {
++                ef = gst_element_factory_find("textsuboverlay");
++            }
++        } else {
++            ef = gst_element_factory_find("textsuboverlay");
++        }
++    } else if(strcmp(gst_structure_get_name(structure), "text/x-ass") == 0) {
++        gboolean special = FALSE;
++        if (gst_structure_has_field(structure, "special")) {
++            gst_structure_get_boolean(structure, "special", &special);
++        }
++        if (special) {
++            ef = gst_element_factory_find("asssuboverlay");
++        } else {
++            ef = gst_element_factory_find("textsuboverlay");
++        }
++    } else {
++        ef = gst_element_factory_find("textsuboverlay");
++    }
++  }
++  return (ef != NULL) ? g_list_prepend(result, ef) : NULL;
++}
++#else
+ static GstPad *
+ _get_sub_pad (GstElement * element)
+ {
+@@ -537,7 +673,7 @@ _get_video_pad (GstElement * element)
+   }
+   return NULL;
+ }
+-
++#endif
+ static gboolean
+ _create_element (GstSubtitleOverlay * self, GstElement ** element,
+     const gchar * factory_name, GstElementFactory * factory,
+@@ -714,20 +850,6 @@ _has_property_with_type (GObject * object, const gchar * property, GType type)
+   return (pspec && pspec->value_type == type);
+ }
+ 
+-static void
+-gst_subtitle_overlay_set_fps (GstSubtitleOverlay * self)
+-{
+-  if (!self->parser || self->fps_d == 0)
+-    return;
+-
+-  if (!_has_property_with_type (G_OBJECT (self->parser), "video-fps",
+-          GST_TYPE_FRACTION))
+-    return;
+-
+-  GST_DEBUG_OBJECT (self, "Updating video-fps property in parser");
+-  g_object_set (self->parser, "video-fps", self->fps_n, self->fps_d, NULL);
+-}
+-
+ static void
+ _update_subtitle_offset (GstSubtitleOverlay * self)
+ {
+@@ -742,28 +864,56 @@ _update_subtitle_offset (GstSubtitleOverlay * self)
+   }
+ }
+ 
+-static const gchar *
+-_get_silent_property (GstElement * element, gboolean * invert)
++#ifdef TCL_PATCH
++static gboolean
++_setup_parser(GstSubtitleOverlay* self)
+ {
+-  static const struct
+-  {
+-    const gchar *name;
+-    gboolean invert;
+-  } properties[] = { {
+-  "silent", FALSE}, {
+-  "enable", TRUE}};
+-  guint i;
++   if(self->parser && g_object_class_find_property(G_OBJECT_GET_CLASS(G_OBJECT(self->parser)), "video-fps"))
++     g_object_set(self->parser, "video-fps", self->fps_n, self->fps_d, NULL);
++   return TRUE;
++}
+ 
+-  for (i = 0; i < G_N_ELEMENTS (properties); i++) {
+-    if (_has_property_with_type (G_OBJECT (element), properties[i].name,
+-            G_TYPE_BOOLEAN)) {
+-      *invert = properties[i].invert;
+-      return properties[i].name;
++/* 补充其他属性 */
++static gboolean
++_setup_renderer(GstSubtitleOverlay* self, GstElement* renderer)
++{
++    return TRUE;
++}
++
++/* subtitle_src==NULL means: use subtitle_sink ghostpad */
++static gboolean
++_link_renderer(GstSubtitleOverlay* self, GstElement* renderer, GstPad* subtitle_src)
++{
++  GstPad* sink = NULL;
++  GstPad* src  = gst_element_get_static_pad(renderer, "src");
++  if (G_UNLIKELY(!src))
++    return FALSE;
++  if (G_UNLIKELY(!gst_ghost_pad_set_target(GST_GHOST_PAD_CAST(self->srcpad), src))) {
++    gst_object_unref(src);
++    return FALSE;
++  }
++  gst_object_unref(src);
++
++  sink = gst_element_get_static_pad(renderer, "subtitle_sink");
++  if (G_UNLIKELY(!sink))
++    return FALSE;
++
++  if (subtitle_src) {
++    if (G_UNLIKELY(gst_pad_link(subtitle_src, sink) != GST_PAD_LINK_OK)) {
++      gst_object_unref(sink);
++      return FALSE;
++    }
++  } else {
++    if (G_UNLIKELY(!gst_ghost_pad_set_target(GST_GHOST_PAD_CAST(self->subtitle_sinkpad), sink))) {
++      gst_object_unref(sink);
++      return FALSE;
+     }
+   }
+-  return NULL;
++  gst_object_unref(sink);
++  return TRUE;
+ }
+ 
++#else
+ static gboolean
+ _setup_parser (GstSubtitleOverlay * self)
+ {
+@@ -1041,12 +1191,54 @@ _link_renderer (GstSubtitleOverlay * self, GstElement * renderer,
+   return TRUE;
+ }
+ 
++static void
++gst_subtitle_overlay_set_fps (GstSubtitleOverlay * self)
++{
++  if (!self->parser || self->fps_d == 0)
++    return;
++
++  if (!_has_property_with_type (G_OBJECT (self->parser), "video-fps",
++          GST_TYPE_FRACTION))
++    return;
++
++  GST_DEBUG_OBJECT (self, "Updating video-fps property in parser");
++  g_object_set (self->parser, "video-fps", self->fps_n, self->fps_d, NULL);
++}
++
++static const gchar *
++_get_silent_property (GstElement * element, gboolean * invert)
++{
++  static const struct
++  {
++    const gchar *name;
++    gboolean invert;
++  } properties[] = { {
++  "silent", FALSE}, {
++  "enable", TRUE}};
++  guint i;
++
++  for (i = 0; i < G_N_ELEMENTS (properties); i++) {
++    if (_has_property_with_type (G_OBJECT (element), properties[i].name,
++            G_TYPE_BOOLEAN)) {
++      *invert = properties[i].invert;
++      return properties[i].name;
++    }
++  }
++  return NULL;
++}
++
++#endif
++
+ static GstPadProbeReturn
+ _pad_blocked_cb (GstPad * pad, GstPadProbeInfo * info, gpointer user_data)
+ {
+   GstSubtitleOverlay *self = GST_SUBTITLE_OVERLAY_CAST (user_data);
+   GstCaps *subcaps;
+   GList *l, *factories = NULL;
++#ifdef TCL_PATCH
++  if(self->need_do_pad_blocked_cb == FALSE)
++    return GST_PAD_PROBE_PASS;
++#endif
+ 
+   if (GST_IS_EVENT (info->data)) {
+     if (!GST_EVENT_IS_SERIALIZED (info->data)) {
+@@ -1103,7 +1295,11 @@ _pad_blocked_cb (GstPad * pad, GstPadProbeInfo * info, gpointer user_data)
+     subcaps = NULL;
+   }
+ 
++#ifdef TCL_PATCH
++  if(self->subtitle_error) {
++#else
+   if (self->subtitle_error || (self->silent && !self->silent_property)) {
++#endif
+     _setup_passthrough (self);
+     do_async_done (self);
+     goto out;
+@@ -1120,7 +1316,9 @@ _pad_blocked_cb (GstPad * pad, GstPadProbeInfo * info, gpointer user_data)
+       gst_object_unref (target);
+ 
+       /* Unblock pads */
++#ifndef TCL_PATCH
+       unblock_video (self);
++#endif
+       unblock_subtitle (self);
+       goto out;
+     } else if (target) {
+@@ -1128,12 +1326,13 @@ _pad_blocked_cb (GstPad * pad, GstPadProbeInfo * info, gpointer user_data)
+     }
+   }
+ 
++#ifndef TCL_PATCH
+   if (self->subtitle_sink_blocked && !self->video_sink_blocked) {
+     GST_DEBUG_OBJECT (self, "Subtitle sink blocked but video not blocked");
+     block_video (self);
+     goto out;
+   }
+-
++#endif
+   self->subtitle_flush = FALSE;
+ 
+   /* Find our factories */
+@@ -1167,6 +1366,87 @@ _pad_blocked_cb (GstPad * pad, GstPadProbeInfo * info, gpointer user_data)
+   factories = g_list_sort (factories, (GCompareFunc) _sort_by_ranks);
+ 
+   for (l = factories; l; l = l->next) {
++#ifdef TCL_PATCH
++    GstElementFactory*   factory       = l->data;
++    SUBTITLE_PLUGIN_TYPE subtitle_type = _element_subtitle_type(factory);
++    gst_ghost_pad_set_target(GST_GHOST_PAD_CAST(self->srcpad), NULL);
++    gst_ghost_pad_set_target(GST_GHOST_PAD_CAST(self->subtitle_sinkpad), NULL);
++    _remove_element(self, &self->parser);
++    _remove_element(self, &self->renderer);
++    _remove_element(self, &self->passthrough_identity);
++
++    /* Parser类是先加载的Parser, 再写死的加载对应的Renderer */
++    if (SUBTITLE_PLUGIN_TYPE_PARSER  == subtitle_type) {
++      GstCaps* parser_caps        = NULL;
++      gchar*   parse_factory_name = NULL;
++      GList*   renderer_factories, *k;
++      GstPad*  src  = NULL;
++      GstPad*  sink = NULL;
++      if (!_create_element(self, &self->parser, NULL, factory, "parser", FALSE) ||
++          !_setup_parser(self))
++        continue;
++
++      src         = gst_element_get_static_pad(self->parser, "src");
++      parser_caps = gst_pad_query_caps(src, NULL);
++      gst_object_unref(src);
++
++      g_assert(parser_caps != NULL);
++      g_mutex_lock(&self->factories_lock);
++      gst_subtitle_overlay_update_factory_list(self);
++      parse_factory_name    = gst_plugin_feature_get_name(GST_PLUGIN_FEATURE_CAST(factory));
++      if (parse_factory_name && strcmp(parse_factory_name, "subparse") == 0)
++        renderer_factories = gst_subtitle_overlay_get_factories_for_subparse(self->factories, self->subcaps);
++      else
++        renderer_factories = gst_subtitle_overlay_get_factories_for_caps(self->factories, parser_caps);
++      g_mutex_unlock(&self->factories_lock);
++
++      if (!renderer_factories) {
++        gst_caps_unref(parser_caps);
++        continue;
++      }
++      gst_caps_unref(parser_caps);
++
++      renderer_factories = g_list_sort(renderer_factories, (GCompareFunc)_sort_by_ranks);
++      for(k = renderer_factories; k; k = k->next) {
++        GstElementFactory* renderer_factory = k->data;
++        gst_ghost_pad_set_target(GST_GHOST_PAD_CAST(self->srcpad),           NULL);
++        gst_ghost_pad_set_target(GST_GHOST_PAD_CAST(self->subtitle_sinkpad), NULL);
++        _remove_element(self, &self->renderer);
++        if (!_create_element(self, &self->renderer, NULL, renderer_factory, "renderer", FALSE) ||
++            !_setup_renderer(self, self->renderer))
++          continue;
++        src = gst_element_get_static_pad(self->parser, "src");
++        if (!_link_renderer(self, self->renderer, src)) {
++          gst_object_unref(src);
++          continue;
++        }
++        gst_object_unref(src);
++        break;
++      }
++
++      if (renderer_factories)
++        gst_plugin_feature_list_free(renderer_factories);
++
++      if (G_UNLIKELY(k == NULL))
++        continue;
++
++      sink = gst_element_get_static_pad(self->parser, "sink");
++      if (!gst_ghost_pad_set_target(GST_GHOST_PAD_CAST(self->subtitle_sinkpad), sink)) {
++        gst_object_unref(sink);
++        continue;
++      }
++      gst_object_unref(sink);
++
++      break;
++    }  else if (SUBTITLE_PLUGIN_TYPE_RENDER == subtitle_type) {
++      if(_create_element(self, &self->renderer, NULL, factory, "renderer", FALSE) &&
++          _setup_renderer(self, self->renderer) &&
++          _link_renderer (self, self->renderer, NULL))
++        break;
++      else
++        continue;
++    }
++#else
+     GstElementFactory *factory = l->data;
+     gboolean is_renderer = _is_renderer (factory);
+     GstPad *sink, *src;
+@@ -1312,6 +1592,7 @@ _pad_blocked_cb (GstPad * pad, GstPadProbeInfo * info, gpointer user_data)
+       /* Everything done here, go out of loop */
+       break;
+     }
++#endif
+   }
+ 
+   if (G_UNLIKELY (l == NULL)) {
+@@ -1356,7 +1637,9 @@ gst_subtitle_overlay_change_state (GstElement * element,
+ 
+       GST_SUBTITLE_OVERLAY_LOCK (self);
+       /* Set the internal pads to blocking */
++#ifndef TCL_PATCH
+       block_video (self);
++#endif
+       block_subtitle (self);
+       GST_SUBTITLE_OVERLAY_UNLOCK (self);
+       break;
+@@ -1367,9 +1650,12 @@ gst_subtitle_overlay_change_state (GstElement * element,
+ 
+       self->subtitle_flush = FALSE;
+       self->subtitle_error = FALSE;
+-
++#ifdef TCL_PATCH
++      self->fps_n          = 24000;
++      self->fps_d          = 1001;
++#else
+       self->downstream_chain_error = FALSE;
+-
++#endif
+       do_async_start (self);
+       ret = GST_STATE_CHANGE_ASYNC;
+ 
+@@ -1407,7 +1693,9 @@ gst_subtitle_overlay_change_state (GstElement * element,
+ 
+       /* Set the pads back to blocking state */
+       GST_SUBTITLE_OVERLAY_LOCK (self);
++#ifndef TCL_PATCH
+       block_video (self);
++#endif
+       block_subtitle (self);
+       GST_SUBTITLE_OVERLAY_UNLOCK (self);
+ 
+@@ -1422,12 +1710,16 @@ gst_subtitle_overlay_change_state (GstElement * element,
+ 
+       /* Unlink ghost pads */
+       gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (self->srcpad), NULL);
++#ifndef TCL_PATCH
+       gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (self->video_sinkpad), NULL);
++#endif
+       gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (self->subtitle_sinkpad),
+           NULL);
+ 
+       /* Unblock pads */
++#ifndef TCL_PATCH
+       unblock_video (self);
++#endif
+       unblock_subtitle (self);
+ 
+       /* Remove elements */
+@@ -1458,6 +1750,14 @@ gst_subtitle_overlay_handle_message (GstBin * bin, GstMessage * message)
+ 
+     /* Convert error messages from the subtitle pipeline to
+      * warnings and switch to passthrough mode */
++#ifdef TCL_PATCH
++    if (src && (
++            (self->parser
++                && gst_object_has_as_ancestor (src,
++                    GST_OBJECT_CAST (self->parser))) || (self->renderer
++                && gst_object_has_as_ancestor (src,
++                    GST_OBJECT_CAST (self->renderer))))) {
++#else
+     if (src && (
+             (self->overlay
+                 && gst_object_has_as_ancestor (src,
+@@ -1466,6 +1766,7 @@ gst_subtitle_overlay_handle_message (GstBin * bin, GstMessage * message)
+                     GST_OBJECT_CAST (self->parser))) || (self->renderer
+                 && gst_object_has_as_ancestor (src,
+                     GST_OBJECT_CAST (self->renderer))))) {
++#endif
+       GError *err = NULL;
+       gchar *debug = NULL;
+       GstMessage *wmsg;
+@@ -1486,7 +1787,9 @@ gst_subtitle_overlay_handle_message (GstBin * bin, GstMessage * message)
+       self->subtitle_error = TRUE;
+ 
+       block_subtitle (self);
++#ifndef TCL_PATCH
+       block_video (self);
++#endif
+       GST_SUBTITLE_OVERLAY_UNLOCK (self);
+     }
+   }
+@@ -1502,6 +1805,7 @@ gst_subtitle_overlay_get_property (GObject * object, guint prop_id,
+ 
+   switch (prop_id) {
+     case PROP_SILENT:
++      GST_WARNING("self->silent = %d", self->silent);
+       g_value_set_boolean (value, self->silent);
+       break;
+     case PROP_FONT_DESC:
+@@ -1519,7 +1823,37 @@ gst_subtitle_overlay_get_property (GObject * object, guint prop_id,
+       g_value_set_int64 (value, self->subtitle_ts_offset);
+       GST_SUBTITLE_OVERLAY_UNLOCK (self);
+       break;
+-
++#ifdef TCL_PATCH
++    case PROP_AV_SYNCDONE:
++      g_value_set_boolean (value, self->av_syncdone);
++      break;
++    case PROP_AV_SYNCDONE_NOTNEED:
++      break;
++    case PROP_AV_SYNC_UPDATE:
++      break;
++    case PROP_VIDEO_DECODER_ID:
++      g_value_set_pointer (value, self->vDecoder);
++      break;
++    case PROP_SUBTITLE_DEBUG:
++      g_value_set_boolean (value, self->subtitle_debug);
++      break;
++    case PROP_VIDEOFPS:
++      gst_value_set_fraction (value, self->fps_n, self->fps_d);
++      break;
++    case PROP_SUB_SURFACE:
++      g_value_set_pointer(value, self->sub_surface);
++      break;
++    case PROP_SUB_USER_SET:
++      g_value_set_pointer(value, self->sub_user_set);
++      break;
++    case PROP_SUB_TYPE_IS_TEXT:
++      if (self->renderer) {
++        gboolean isText = TRUE;       // default is text
++        g_object_get(self->renderer, "sub-type-is-text", &isText, NULL);
++        g_value_set_boolean (value, isText);
++      }
++      break;
++#endif
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+       break;
+@@ -1534,6 +1868,11 @@ gst_subtitle_overlay_set_property (GObject * object, guint prop_id,
+ 
+   switch (prop_id) {
+     case PROP_SILENT:
++#ifdef TCL_PATCH
++      self->silent = g_value_get_boolean(value);
++      if(self->renderer)
++        g_object_set (self->renderer, "silent", self->silent, NULL);
++#else
+       GST_SUBTITLE_OVERLAY_LOCK (self);
+       self->silent = g_value_get_boolean (value);
+       if (self->silent_property) {
+@@ -1551,6 +1890,7 @@ gst_subtitle_overlay_set_property (GObject * object, guint prop_id,
+         block_video (self);
+       }
+       GST_SUBTITLE_OVERLAY_UNLOCK (self);
++#endif
+       break;
+     case PROP_FONT_DESC:
+       GST_SUBTITLE_OVERLAY_LOCK (self);
+@@ -1587,7 +1927,62 @@ gst_subtitle_overlay_set_property (GObject * object, guint prop_id,
+       _update_subtitle_offset (self);
+       GST_SUBTITLE_OVERLAY_UNLOCK (self);
+       break;
++#ifdef TCL_PATCH
++    case PROP_AV_SYNCDONE:
++      GST_SUBTITLE_OVERLAY_LOCK (self);
++      self->av_syncdone = TRUE;
++      if (self->renderer)
++        g_object_set(self->renderer, "avsyncdone", TRUE, NULL);
++      GST_SUBTITLE_OVERLAY_UNLOCK (self);
++      break;
++    case PROP_AV_SYNCDONE_NOTNEED:
++      GST_SUBTITLE_OVERLAY_LOCK (self);
++      self->need_do_pad_blocked_cb = TRUE;
++      GST_SUBTITLE_OVERLAY_UNLOCK (self);
++      break;
++    case PROP_AV_SYNC_UPDATE:
++      GST_SUBTITLE_OVERLAY_LOCK (self);
++      if(self->renderer)
++        g_object_set(self->renderer, "avsync-update", g_value_get_pointer(value), NULL);
++      GST_SUBTITLE_OVERLAY_UNLOCK (self);
++      break;
++    case PROP_VIDEO_DECODER_ID:
++      GST_SUBTITLE_OVERLAY_LOCK (self);
++      if (g_value_get_pointer(value) != NULL) {
++        self->vDecoder = g_value_get_pointer(value);
++        if (self->renderer)
++          g_object_set(self->renderer, "video-decoder-id", g_value_get_pointer(value), NULL);
++      }
++      GST_SUBTITLE_OVERLAY_UNLOCK (self);
++      break;
++    case PROP_VIDEOFPS:
++      GST_SUBTITLE_OVERLAY_LOCK (self);
++      self->fps_n = gst_value_get_fraction_numerator(value);
++      self->fps_d = gst_value_get_fraction_denominator(value);
++      /* 目前仅为subparse设置了video-fps */
++      if (self->parser && g_object_class_find_property(G_OBJECT_GET_CLASS(G_OBJECT(self->parser)), "video-fps"))
++        g_object_set(self->parser, "video-fps", self->fps_n, self->fps_d, NULL);
+ 
++      GST_SUBTITLE_OVERLAY_UNLOCK (self);
++      break;
++    case PROP_SUBTITLE_DEBUG:
++      break;
++    case PROP_SUB_SURFACE:
++      GST_SUBTITLE_OVERLAY_LOCK (self);
++      self->sub_surface = g_value_get_pointer(value);
++      if (self->renderer)
++        g_object_set(self->renderer, "sub-surface", g_value_get_pointer(value), NULL);
++      GST_SUBTITLE_OVERLAY_UNLOCK (self);
++      break;
++    case PROP_SUB_USER_SET:
++      GST_SUBTITLE_OVERLAY_LOCK (self);
++      if (self->renderer) {
++        self->sub_user_set = g_value_get_pointer(value);
++        g_object_set(self->renderer, "sub-user-set", self->sub_user_set, NULL);
++      }
++      GST_SUBTITLE_OVERLAY_UNLOCK (self);
++      break;
++#endif
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+       break;
+@@ -1632,10 +2027,61 @@ gst_subtitle_overlay_class_init (GstSubtitleOverlayClass * klass)
+           G_MININT64, G_MAXINT64, 0,
+           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+ 
++#ifdef TCL_PATCH
++  g_object_class_install_property(gobject_class, PROP_AV_SYNCDONE,
++     g_param_spec_boolean("avsyncdone", "avsyncdone",
++          "av sync done", FALSE,
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property(gobject_class, PROP_AV_SYNCDONE_NOTNEED,
++      g_param_spec_boolean("av-syncdone-notneed", "av-syncdone-notneed",
++          "av sync done not need because of change track", FALSE,
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property(gobject_class, PROP_AV_SYNC_UPDATE,
++      g_param_spec_pointer("avsync-update", "update av sync data",
++          "The AVSync update user_data",
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++  g_object_class_install_property(gobject_class, PROP_VIDEO_DECODER_ID,
++      g_param_spec_pointer("video-decoder-id", "video decoder id",
++          "The index of video decoder id",
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property(gobject_class, PROP_SUBTITLE_DEBUG,
++      g_param_spec_boolean("subtitle-debug", "subtitle-debug",
++          "subtitle debug on/off", FALSE,
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property(gobject_class, PROP_VIDEOFPS,
++      gst_param_spec_fraction("video-fps", "Video framerate",
++          "Framerate of the video stream. This is needed by some subtitle "
++          "formats to synchronize subtitles and video properly. If not set "
++          "and the subtitle format requires it subtitles may be out of sync.",
++          0, 1, G_MAXINT, 1, 24000, 1001,
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_class, PROP_SUB_SURFACE,
++      g_param_spec_pointer ("sub-surface","Subtitle surface",
++          "Surface for subtitle",
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_class, PROP_SUB_USER_SET,
++      g_param_spec_pointer ("sub-user-set","subtitle user setting",
++          "User subtitle display setting",
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_class, PROP_SUB_TYPE_IS_TEXT,
++      g_param_spec_boolean ("sub-type-is-text", "subtitle type",
++          "tell subtitle type. TRUE: text; FALSE: picture", TRUE,
++          G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
++#endif
++
+   gst_element_class_add_static_pad_template (element_class, &srctemplate);
+ 
++#ifndef TCL_PATCH
+   gst_element_class_add_static_pad_template (element_class,
+       &video_sinktemplate);
++#endif
+   gst_element_class_add_static_pad_template (element_class,
+       &subtitle_sinktemplate);
+ 
+@@ -1651,6 +2097,7 @@ gst_subtitle_overlay_class_init (GstSubtitleOverlayClass * klass)
+       GST_DEBUG_FUNCPTR (gst_subtitle_overlay_handle_message);
+ }
+ 
++#ifndef TCL_PATCH
+ static GstFlowReturn
+ gst_subtitle_overlay_src_proxy_chain (GstPad * proxypad, GstObject * parent,
+     GstBuffer * buffer)
+@@ -1819,6 +2266,7 @@ gst_subtitle_overlay_video_sink_chain (GstPad * pad, GstObject * parent,
+ 
+   return ret;
+ }
++#endif
+ 
+ static GstFlowReturn
+ gst_subtitle_overlay_subtitle_sink_chain (GstPad * pad, GstObject * parent,
+@@ -1826,19 +2274,34 @@ gst_subtitle_overlay_subtitle_sink_chain (GstPad * pad, GstObject * parent,
+ {
+   GstSubtitleOverlay *self = GST_SUBTITLE_OVERLAY (parent);
+ 
++#ifdef TCL_PATCH
++  /* 去除由gstinputerselector传递的假数据 */
++  if (gst_buffer_get_size(buffer) == 2 && GST_BUFFER_PTS(buffer) == 0 &&
++     GST_BUFFER_DTS(buffer) == 0 && GST_BUFFER_DURATION(buffer) == 0) {
++     gst_buffer_unref(buffer);
++     return GST_FLOW_OK;
++  }
++#endif
+   if (self->subtitle_error) {
+     gst_buffer_unref (buffer);
+     return GST_FLOW_OK;
+   } else {
+     GstFlowReturn ret = gst_proxy_pad_chain_default (pad, parent, buffer);
+ 
++#ifdef TCL_PATCH
++    if (G_UNLIKELY(ret == GST_FLOW_ERROR || ret == GST_FLOW_NOT_NEGOTIATED)) {
++#else
+     if (IS_SUBTITLE_CHAIN_IGNORE_ERROR (ret)) {
++#endif
+       GST_DEBUG_OBJECT (self, "Subtitle chain error: %s",
+           gst_flow_get_name (ret));
+       GST_SUBTITLE_OVERLAY_LOCK (self);
+       self->subtitle_error = TRUE;
+       block_subtitle (self);
++
++#ifndef TCL_PATCH
+       block_video (self);
++#endif
+       GST_SUBTITLE_OVERLAY_UNLOCK (self);
+ 
+       return GST_FLOW_OK;
+@@ -1889,7 +2352,12 @@ gst_subtitle_overlay_subtitle_sink_setcaps (GstSubtitleOverlay * self,
+ 
+   self->subtitle_error = FALSE;
+   block_subtitle (self);
++
++#ifdef TCL_PATCH
++  self->need_do_pad_blocked_cb = TRUE;
++#else
+   block_video (self);
++#endif
+   GST_SUBTITLE_OVERLAY_UNLOCK (self);
+ 
+ out:
+@@ -1925,7 +2393,10 @@ gst_subtitle_overlay_subtitle_sink_link (GstPad * pad, GstObject * parent,
+     self->subtitle_error = FALSE;
+ 
+     block_subtitle (self);
++
++#ifndef TCL_PATCH
+     block_video (self);
++#endif
+     GST_SUBTITLE_OVERLAY_UNLOCK (self);
+     gst_caps_unref (caps);
+   }
+@@ -1949,7 +2420,10 @@ gst_subtitle_overlay_subtitle_sink_unlink (GstPad * pad, GstObject * parent)
+   self->subtitle_error = FALSE;
+ 
+   block_subtitle (self);
++
++#ifndef TCL_PATCH
+   block_video (self);
++#endif
+   GST_SUBTITLE_OVERLAY_UNLOCK (self);
+ }
+ 
+@@ -1969,7 +2443,10 @@ gst_subtitle_overlay_subtitle_sink_event (GstPad * pad, GstObject * parent,
+     self->subtitle_flush = TRUE;
+     self->subtitle_error = FALSE;
+     block_subtitle (self);
++
++#ifndef TCL_PATCH
+     block_video (self);
++#endif
+     GST_SUBTITLE_OVERLAY_UNLOCK (self);
+ 
+     gst_event_unref (event);
+@@ -1978,6 +2455,14 @@ gst_subtitle_overlay_subtitle_sink_event (GstPad * pad, GstObject * parent,
+     goto out;
+   }
+ 
++#ifdef TCL_PATCH
++  if (GST_EVENT_TYPE(event) == GST_EVENT_STREAM_START) {
++    gst_event_unref(event);
++    event   = NULL;
++    ret     = TRUE;
++    goto out;
++  }
++#endif
+   switch (GST_EVENT_TYPE (event)) {
+     case GST_EVENT_CAPS:
+     {
+@@ -1985,14 +2470,25 @@ gst_subtitle_overlay_subtitle_sink_event (GstPad * pad, GstObject * parent,
+ 
+       gst_event_parse_caps (event, &caps);
+       ret = gst_subtitle_overlay_subtitle_sink_setcaps (self, caps);
++
++#ifdef TCL_PATCH
++      if (!ret) {
++        gst_event_unref(event);
++        event = NULL;
++        goto out;
++      }
++#else
+       if (!ret)
+         goto out;
++#endif
+       break;
+     }
+     case GST_EVENT_FLUSH_STOP:
+     case GST_EVENT_FLUSH_START:
+     case GST_EVENT_SEGMENT:
+     case GST_EVENT_EOS:
++
++#ifndef TCL_PATCH
+     {
+       GstStructure *structure;
+ 
+@@ -2005,13 +2501,18 @@ gst_subtitle_overlay_subtitle_sink_event (GstPad * pad, GstObject * parent,
+           G_TYPE_BOOLEAN, TRUE, NULL);
+       break;
+     }
++#endif
+     default:
+       break;
+   }
+ 
++#ifdef TCL_PATCH
++  ret = gst_pad_event_default(pad, parent, event);
++#else
+   ret = gst_pad_event_default (pad, parent, gst_event_ref (event));
+ 
+   gst_event_unref (event);
++#endif
+ 
+ out:
+   return ret;
+@@ -2064,14 +2565,23 @@ gst_subtitle_overlay_init (GstSubtitleOverlay * self)
+ 
+   proxypad =
+       GST_PAD_CAST (gst_proxy_pad_get_internal (GST_PROXY_PAD (self->srcpad)));
++
++#ifdef TCL_PATCH
++  gst_pad_set_event_function(proxypad,
++      GST_DEBUG_FUNCPTR(gst_pad_event_default));
++  gst_pad_set_chain_function(proxypad,
++      GST_DEBUG_FUNCPTR(gst_proxy_pad_chain_default));
++#else
+   gst_pad_set_event_function (proxypad,
+       GST_DEBUG_FUNCPTR (gst_subtitle_overlay_src_proxy_event));
+   gst_pad_set_chain_function (proxypad,
+       GST_DEBUG_FUNCPTR (gst_subtitle_overlay_src_proxy_chain));
++#endif
+   gst_object_unref (proxypad);
+ 
+   gst_element_add_pad (GST_ELEMENT_CAST (self), self->srcpad);
+ 
++#ifndef TCL_PATCH
+   templ = gst_static_pad_template_get (&video_sinktemplate);
+   self->video_sinkpad =
+       gst_ghost_pad_new_no_target_from_template ("video_sink", templ);
+@@ -2087,6 +2597,7 @@ gst_subtitle_overlay_init (GstSubtitleOverlay * self)
+   self->video_block_pad = proxypad;
+   gst_object_unref (proxypad);
+   gst_element_add_pad (GST_ELEMENT_CAST (self), self->video_sinkpad);
++#endif
+ 
+   templ = gst_static_pad_template_get (&subtitle_sinktemplate);
+   self->subtitle_sinkpad =
+@@ -2111,6 +2622,21 @@ gst_subtitle_overlay_init (GstSubtitleOverlay * self)
+ 
+   gst_element_add_pad (GST_ELEMENT_CAST (self), self->subtitle_sinkpad);
+ 
++#ifdef TCL_PATCH
++  self->fps_n                  = 24000;
++  self->fps_n                  = 24000;
++  self->fps_d                  = 1001;
++  self->need_do_pad_blocked_cb = FALSE;
++  self->vDecoder               = NULL;
++  self->av_syncdone            = FALSE;
++  self->subtitle_debug         = FALSE;
++
++  self->sub_surface            = NULL;
++
++  self->sub_user_set           = NULL;
++#else
+   self->fps_n = 0;
+   self->fps_d = 0;
++#endif
++
+ }
+diff --git a/subprojects/gst-plugins-base/gst/playback/gstsubtitleoverlay.h b/subprojects/gst-plugins-base/gst/playback/gstsubtitleoverlay.h
+index 22a04ffb71..4ece41c64d 100644
+--- a/subprojects/gst-plugins-base/gst/playback/gstsubtitleoverlay.h
++++ b/subprojects/gst-plugins-base/gst/playback/gstsubtitleoverlay.h
+@@ -104,6 +104,17 @@ struct _GstSubtitleOverlay
+ 
+   const gchar *silent_property;
+   gboolean silent_property_invert;
++
++#ifdef TCL_PATCH
++  gboolean        need_do_pad_blocked_cb;
++  gpointer        vDecoder;
++  gboolean        av_syncdone;
++  gboolean        subtitle_debug;
++
++  gpointer        sub_surface;
++
++  gpointer        sub_user_set;
++#endif
+ };
+ 
+ struct _GstSubtitleOverlayClass
+diff --git a/subprojects/gst-plugins-base/gst/playback/gsturidecodebin.c b/subprojects/gst-plugins-base/gst/playback/gsturidecodebin.c
+index d2ef65883c..5a5ebb737c 100644
+--- a/subprojects/gst-plugins-base/gst/playback/gsturidecodebin.c
++++ b/subprojects/gst-plugins-base/gst/playback/gsturidecodebin.c
+@@ -119,6 +119,16 @@ struct _GstURIDecodeBin
+   gboolean expose_allstreams;   /* Whether to expose unknown type streams or not */
+ 
+   guint64 ring_buffer_max_size; /* 0 means disabled */
++
++#ifdef TCL_PATCH
++  gint file_fd;
++  gint64 file_start_offset;
++  gint64 file_length;
++  gboolean use_http_pull;
++  gboolean use_smb_push;
++  gboolean use_iso_src;
++  gint iso_current_title;
++#endif
+ };
+ 
+ struct _GstURIDecodeBinClass
+@@ -201,7 +211,17 @@ enum
+   PROP_USE_BUFFERING,
+   PROP_FORCE_SW_DECODERS,
+   PROP_EXPOSE_ALL_STREAMS,
+-  PROP_RING_BUFFER_MAX_SIZE
++  PROP_RING_BUFFER_MAX_SIZE,
++
++#ifdef TCL_PATCH
++  PROP_FILE_FD,
++  PROP_FILE_START_OFFSET,
++  PROP_FILE_LENGTH,
++  PROP_USE_HTTP_PULL,
++  PROP_USE_SMB_PUSH,
++  PROP_USE_ISO_SRC,
++  PROP_ISO_CURRENT_TITLE,
++#endif
+ };
+ 
+ static guint gst_uri_decode_bin_signals[LAST_SIGNAL] = { 0 };
+@@ -529,6 +549,44 @@ gst_uri_decode_bin_class_init (GstURIDecodeBinClass * klass)
+           0, G_MAXUINT, DEFAULT_RING_BUFFER_MAX_SIZE,
+           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+ 
++#ifdef TCL_PATCH
++  g_object_class_install_property (gobject_class, PROP_FILE_FD,
++      g_param_spec_int ("file-fd", "File Fd",
++          "Fd for file to read", G_MININT, G_MAXINT, -1,
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
++          GST_PARAM_MUTABLE_READY));
++
++  g_object_class_install_property (gobject_class, PROP_FILE_START_OFFSET,
++      g_param_spec_int64 ("file-start-offset", "File Start Offset",
++          "Start offset for file to read", G_MININT64, G_MAXINT64, 0,
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_class, PROP_FILE_LENGTH,
++        g_param_spec_int64 ("file-length", "File Length",
++            "Length for file to read", G_MININT64, G_MAXINT64, 0,
++            G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_class, PROP_USE_HTTP_PULL,
++      g_param_spec_boolean ("use-http-pull", "use httppullsrc",
++          "use httppullsrc plugin", FALSE,
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_class, PROP_USE_SMB_PUSH,
++      g_param_spec_boolean ("use-smb-push", "use smbpushsrc",
++          "use smbpushsrc plugin", FALSE,
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_class, PROP_USE_ISO_SRC,
++      g_param_spec_boolean ("use-iso-src", "use isosrc",
++          "use iso source plugin", FALSE,
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_class, PROP_ISO_CURRENT_TITLE,
++      g_param_spec_int ("current-title", "current title",
++          "current title for iso set", G_MININT, G_MAXINT, -1,
++          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
++          GST_PARAM_MUTABLE_READY));
++#endif
+   /**
+    * GstURIDecodeBin::unknown-type:
+    * @bin: The uridecodebin.
+@@ -756,6 +814,16 @@ gst_uri_decode_bin_init (GstURIDecodeBin * dec)
+   dec->expose_allstreams = DEFAULT_EXPOSE_ALL_STREAMS;
+   dec->ring_buffer_max_size = DEFAULT_RING_BUFFER_MAX_SIZE;
+ 
++#ifdef TCL_PATCH
++  dec->file_fd = -1;
++  dec->file_start_offset = 0;
++  dec->file_length = 0;
++  dec->use_http_pull = FALSE;
++  dec->use_smb_push = FALSE;
++  dec->use_iso_src = FALSE;
++  dec->iso_current_title = -1;
++#endif
++
+   GST_OBJECT_FLAG_SET (dec, GST_ELEMENT_FLAG_SOURCE);
+   gst_bin_set_suppressed_flags (GST_BIN (dec),
+       GST_ELEMENT_FLAG_SOURCE | GST_ELEMENT_FLAG_SINK);
+@@ -850,6 +918,37 @@ gst_uri_decode_bin_set_property (GObject * object, guint prop_id,
+     case PROP_RING_BUFFER_MAX_SIZE:
+       dec->ring_buffer_max_size = g_value_get_uint64 (value);
+       break;
++
++#ifdef TCL_PATCH
++    case PROP_FILE_FD:
++      dec->file_fd = g_value_get_int (value);
++      GST_INFO("dec->file_fd = %d",dec->file_fd);
++      break;
++    case PROP_FILE_START_OFFSET:
++      dec->file_start_offset = g_value_get_int64 (value);
++      GST_INFO("dec->file_start_offset = %lld",dec->file_start_offset);
++      break;
++    case PROP_FILE_LENGTH:
++      dec->file_length = g_value_get_int64 (value);
++      GST_INFO("dec->file_length = %lld",dec->file_length);
++      break;
++    case PROP_USE_HTTP_PULL:
++      dec->use_http_pull = g_value_get_boolean (value);
++      GST_DEBUG("dec->use_http_pull = %d",dec->use_http_pull);
++      break;
++    case PROP_USE_SMB_PUSH:
++      dec->use_smb_push = g_value_get_boolean (value);
++      GST_DEBUG("dec->use_smb_push = %d",dec->use_smb_push);
++      break;
++    case PROP_USE_ISO_SRC:
++      dec->use_iso_src = g_value_get_boolean (value);
++      GST_DEBUG("dec->use_iso_src = %d",dec->use_iso_src);
++      break;
++    case PROP_ISO_CURRENT_TITLE:
++      dec->iso_current_title = g_value_get_int (value);
++      GST_INFO("iso current title = %d",dec->iso_current_title);
++      break;
++#endif
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+       break;
+@@ -913,6 +1012,30 @@ gst_uri_decode_bin_get_property (GObject * object, guint prop_id,
+     case PROP_RING_BUFFER_MAX_SIZE:
+       g_value_set_uint64 (value, dec->ring_buffer_max_size);
+       break;
++
++#ifdef TCL_PATCH
++    case PROP_FILE_FD:
++      g_value_set_int (value, dec->file_fd);
++      break;
++    case PROP_FILE_START_OFFSET:
++      g_value_set_int64 (value, dec->file_start_offset);
++      break;
++    case PROP_FILE_LENGTH:
++      g_value_set_int64 (value, dec->file_length);
++      break;
++    case PROP_USE_HTTP_PULL:
++      g_value_set_boolean (value, dec->use_http_pull);
++      break;
++    case PROP_USE_SMB_PUSH:
++      g_value_set_boolean (value, dec->use_smb_push);
++      break;
++    case PROP_USE_ISO_SRC:
++      g_value_set_boolean (value, dec->use_iso_src);
++      break;
++    case PROP_ISO_CURRENT_TITLE:
++      g_value_set_int (value, dec->iso_current_title);
++      break;
++#endif
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+       break;
+@@ -1345,13 +1468,34 @@ gen_source_element (GstURIDecodeBin * decoder)
+   if (IS_BLACKLISTED_URI (decoder->uri))
+     goto uri_blacklisted;
+ 
++#ifdef TCL_PATCH
++  source =
++      gst_element_make_from_uri_ext (GST_URI_SRC, decoder->uri, "source", &err,
++          decoder->use_http_pull, decoder->use_smb_push, decoder->use_iso_src);
++#else
+   source =
+       gst_element_make_from_uri (GST_URI_SRC, decoder->uri, "source", &err);
++#endif
+   if (!source)
+     goto no_source;
+ 
+   GST_LOG_OBJECT (decoder, "found source type %s", G_OBJECT_TYPE_NAME (source));
+ 
++#ifdef TCL_PATCH
++  if (decoder->file_fd != -1) {
++    g_object_set (source, "fd", decoder->file_fd, NULL);
++    if (decoder->file_start_offset != 0 && decoder->file_length != 0) {
++      g_object_set (source, "start-offset", decoder->file_start_offset, NULL);
++      g_object_set (source, "length", decoder->file_length, NULL);
++    }
++  }
++
++  if (decoder->iso_current_title != -1) {
++    GST_WARNING_OBJECT(decoder, "iso_current_title is %d", decoder->iso_current_title);
++    g_object_set (source, "current-title", decoder->iso_current_title, NULL);
++  }
++#endif
++
+   source_class = G_OBJECT_GET_CLASS (source);
+ 
+   pspec = g_object_class_find_property (source_class, "connection-speed");
+@@ -1844,6 +1988,10 @@ make_decoder (GstURIDecodeBin * decoder)
+     if (!decodebin)
+       goto no_decodebin;
+ 
++    if (g_object_get_data(G_OBJECT(decoder),"isMainUridecodebin")) {
++        g_object_set_data(G_OBJECT(decodebin),"isMainUridecodebin","true");
++    }
++
+     /* sanity check */
+     if (decodebin->numsinkpads == 0)
+       goto no_typefind;
+@@ -2281,7 +2429,10 @@ setup_source (GstURIDecodeBin * decoder)
+ 
+   if (is_live_source (decoder->source))
+     decoder->is_stream = FALSE;
+-
++#ifdef TCL_PATCH
++  if(decoder->use_http_pull || decoder->use_iso_src)
++     decoder->is_stream = FALSE;
++#endif
+   /* remove the old decoders now, if any */
+   remove_decoders (decoder, FALSE);
+ 
+diff --git a/subprojects/gst-plugins-base/gst/playback/gsturisourcebin.c b/subprojects/gst-plugins-base/gst/playback/gsturisourcebin.c
+index 0e8d7e4d63..7d1eb20c3f 100644
+--- a/subprojects/gst-plugins-base/gst/playback/gsturisourcebin.c
++++ b/subprojects/gst-plugins-base/gst/playback/gsturisourcebin.c
+@@ -2292,10 +2292,15 @@ setup_source (GstURISourceBin * urisrc)
+ 
+     return TRUE;
+   } else if (urisrc->is_stream) {
+-    GST_DEBUG_OBJECT (urisrc, "Setting up streaming");
+-    /* do the stream things here */
+-    if (!setup_typefind (urisrc, NULL))
+-      goto streaming_failed;
++    if (!urisrc->src_np_sig_id) {
++      GST_DEBUG_OBJECT (urisrc, "Setting up streaming");
++      /* do the stream things here */
++      if (!setup_typefind (urisrc, NULL))
++        goto streaming_failed;
++    } else {
++      GST_DEBUG_OBJECT (urisrc, "Not setting up streaming yet, waiting for"
++          " dynamic pads to appear");
++    }
+   } else {
+     GstIterator *pads_iter;
+     gboolean done = FALSE;
+diff --git a/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctions.c b/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctions.c
+index 5a4df3187d..de6054ca08 100644
+--- a/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctions.c
++++ b/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctions.c
+@@ -516,12 +516,19 @@ hls_type_find (GstTypeFind * tf, gpointer unused)
+ 
+   /* Check only the first 4KB */
+   while (c.offset < 4096) {
++#ifdef TCL_PATCH
++    if (G_UNLIKELY (!data_scan_ctx_ensure_data (tf, &c, 25)))
++#else
+     if (G_UNLIKELY (!data_scan_ctx_ensure_data (tf, &c, 21)))
++#endif
+       return;
+ 
+     /* Search for # comment lines */
+     if (c.data[0] == '#' && (memcmp (c.data, "#EXT-X-TARGETDURATION", 21) == 0
+             || memcmp (c.data, "#EXT-X-STREAM-INF", 17) == 0
++#ifdef TCL_PATCH
++            || memcmp (c.data, "#EXT-X-I-FRAME-STREAM-INF", 25) == 0
++#endif
+             || memcmp (c.data, "#EXT-X-MEDIA", 12) == 0)) {
+       gst_type_find_suggest (tf, GST_TYPE_FIND_MAXIMUM, HLS_CAPS);
+       return;
+@@ -1878,6 +1885,76 @@ ac3_type_find (GstTypeFind * tf, gpointer unused)
+   }
+ }
+ 
++#ifdef TCL_PATCH
++/*** audio/x-ac4 ***/
++static GstStaticCaps ac4_caps = GST_STATIC_CAPS ("audio/x-ac4-tcl");
++#define AC4_CAPS (gst_static_caps_get(&ac4_caps))
++#define GST_AC4_TYPEFIND_MATCH_COUNT (10)
++#define GST_AC4_TYPEFIND_TRY_SYNC (GST_TYPE_FIND_MAXIMUM * 100) /* 10kB */
++
++static void
++ac4_type_find (GstTypeFind * tf, gpointer unused)
++{
++  DataScanCtx c = { 0, NULL, 0 };
++  int match_count = 0;
++  const guint8 *data;
++  GstByteReader br;
++  guint frame_size = 0;
++  guint headerSize = 0;
++  guint16 sync;
++  int kSyncWordAC40 = 0xAC40;
++  int kSyncWordAC41 = 0xAC41;
++  while (c.offset < GST_AC4_TYPEFIND_TRY_SYNC) {
++    if (G_UNLIKELY (!data_scan_ctx_ensure_data (tf, &c, 8))) {
++        if (match_count > 0) {
++          gst_type_find_suggest (tf, GST_TYPE_FIND_POSSIBLE, AC4_CAPS);
++          GST_DEBUG ("parse %d byte, find %d AC4 frame, looks good", c.offset, match_count);
++        }
++        return;
++    }
++
++    data = c.data;
++    frame_size = 0;
++    headerSize = 0;
++    gst_byte_reader_init (&br, data, c.size - c.offset);
++
++    GST_DEBUG ("size %d, offset:%llu, data[0-4] %x %x %x %x", c.size, c.offset, data[0], data[1], data[2], data[3]);
++    sync = gst_byte_reader_get_uint16_be_unchecked (&br);
++
++    if (sync != kSyncWordAC40 && sync != kSyncWordAC41) {
++      return;
++    }
++
++    headerSize += 2;
++
++    frame_size = gst_byte_reader_get_uint16_be_unchecked (&br);
++    headerSize += 2;
++
++    if (frame_size == 0xFFFF) {
++      frame_size = gst_byte_reader_get_uint24_be_unchecked (&br);
++      headerSize += 3;
++    }
++
++    if (frame_size == 0 || frame_size > GST_AC4_TYPEFIND_TRY_SYNC) {
++      return;
++    }
++
++    if (sync == kSyncWordAC41) {
++      frame_size += 2; // crc_word
++    }
++
++    frame_size += headerSize;
++    GST_DEBUG ("parsed AC4 frameSize = %d,header size:%d", frame_size, headerSize);
++    if (++match_count > GST_AC4_TYPEFIND_MATCH_COUNT) {
++      gst_type_find_suggest (tf, GST_TYPE_FIND_POSSIBLE, AC4_CAPS);
++      GST_DEBUG ("found successive AC4 frame, looks good");
++      return;
++    }
++    data_scan_ctx_advance (tf, &c, frame_size);
++  }
++}
++#endif
++
+ /*** audio/x-dts ***/
+ static GstStaticCaps dts_caps = GST_STATIC_CAPS ("audio/x-dts");
+ #define DTS_CAPS (gst_static_caps_get (&dts_caps))
+@@ -2503,11 +2580,19 @@ static GstStaticCaps mpegts_caps = GST_STATIC_CAPS ("video/mpegts, "
+  * null PIDs. Still, these streams are valid TS streams (for null packets,
+  * AFC is supposed to be 0x1, but the spec also says decoders should just
+  * discard any packets with AFC = 0x00) */
++
++#ifdef TCL_PATCH
+ #define IS_MPEGTS_HEADER(data) (data[0] == 0x47 && \
+-                                (data[1] & 0x80) == 0x00 && \
++                                ((data[1] & 0x80) == 0x00 ||  (data[1] & 0xFF) == 0xFF) && \
+                                 ((data[3] & 0x30) != 0x00 || \
+                                 ((data[3] & 0x30) == 0x00 && (data[1] & 0x1f) == 0x1f && (data[2] & 0xff) == 0xff)))
+ 
++#else
++#define IS_MPEGTS_HEADER(data) (data[0] == 0x47 && \
++                                (data[1] & 0x80) == 0x00 && \
++                                ((data[3] & 0x30) != 0x00 || \
++                                ((data[3] & 0x30) == 0x00 && (data[1] & 0x1f) == 0x1f && (data[2] & 0xff) == 0xff)))
++#endif
+ /* Helper function to search ahead at intervals of packet_size for mpegts
+  * headers */
+ static gint
+@@ -2797,8 +2882,12 @@ h263_video_type_find (GstTypeFind * tf, gpointer unused)
+ /*** video/x-h264 H264 elementary video stream ***/
+ 
+ static GstStaticCaps h264_video_caps =
+-GST_STATIC_CAPS ("video/x-h264,stream-format=byte-stream");
+ 
++#ifdef TCL_PATCH
++GST_STATIC_CAPS ("video/x-h264-tcl,stream-format=byte-stream");
++#else
++GST_STATIC_CAPS ("video/x-h264,stream-format=byte-stream");
++#endif
+ #define H264_VIDEO_CAPS gst_static_caps_get(&h264_video_caps)
+ 
+ #define H264_MAX_PROBE_LENGTH (128 * 1024)      /* 128kB for HD should be enough. */
+@@ -2899,8 +2988,12 @@ h264_video_type_find (GstTypeFind * tf, gpointer unused)
+ /*** video/x-h265 H265 elementary video stream ***/
+ 
+ static GstStaticCaps h265_video_caps =
+-GST_STATIC_CAPS ("video/x-h265,stream-format=byte-stream");
+ 
++#ifdef TCL_PATCH
++GST_STATIC_CAPS ("video/x-h265-tcl,stream-format=byte-stream");
++#else
++GST_STATIC_CAPS ("video/x-h265,stream-format=byte-stream");
++#endif
+ #define H265_VIDEO_CAPS gst_static_caps_get(&h265_video_caps)
+ 
+ #define H265_MAX_PROBE_LENGTH (128 * 1024)      /* 128kB for HD should be enough. */
+@@ -4198,7 +4291,9 @@ bmp_type_find (GstTypeFind * tf, gpointer unused)
+ {
+   DataScanCtx c = { 0, NULL, 0 };
+   guint32 struct_size, w, h, planes, bpp;
+-
++#ifdef TCL_PATCH
++  guint32 cformat = -1;
++#endif
+   if (G_UNLIKELY (!data_scan_ctx_ensure_data (tf, &c, 54)))
+     return;
+ 
+@@ -4229,16 +4324,38 @@ bmp_type_find (GstTypeFind * tf, gpointer unused)
+     h = GST_READ_UINT16_LE (c.data + 2);
+     planes = GST_READ_UINT16_LE (c.data + 2 + 2);
+     bpp = GST_READ_UINT16_LE (c.data + 2 + 2 + 2);
++#ifdef TCL_PATCH
++    cformat = GST_READ_UINT32_LE (c.data + 2 + 2 + 2 + 2);
++  } else if (struct_size == 40 || struct_size == 52 || struct_size == 56 || struct_size == 64 || struct_size == 108
++      || struct_size == 124 || struct_size == 0xF0) {
++#else
+   } else if (struct_size == 40 || struct_size == 64 || struct_size == 108
+       || struct_size == 124 || struct_size == 0xF0) {
++#endif
+     w = GST_READ_UINT32_LE (c.data);
+     h = GST_READ_UINT32_LE (c.data + 4);
+     planes = GST_READ_UINT16_LE (c.data + 4 + 4);
+     bpp = GST_READ_UINT16_LE (c.data + 4 + 4 + 2);
++#ifdef TCL_PATCH
++    cformat = GST_READ_UINT32_LE (c.data + 4 + 4 + 2 + 2);
++#endif
+   } else {
+     return;
+   }
+ 
++#ifdef TCL_PATCH
++  gint32 width = (gint32)w;
++  gint32 height = (gint32)h;
++  /* image sizes sanity check */
++  GST_LOG ("w=%d, h=%d, planes=%u, bpp=%u, cformat=%d", w, h, planes, bpp, cformat);
++  if (width == 0 || width > 0xfffff || height == 0 || height > 0xfffff || planes != 1 ||
++      (bpp != 1 && bpp != 4 && bpp != 8 && bpp != 16 && bpp != 24 && bpp != 32))
++    return;
++
++  gst_type_find_suggest_simple (tf, GST_TYPE_FIND_MAXIMUM, "image/bmp",
++      "width", G_TYPE_INT, width, "height", G_TYPE_INT, height, "bpp", G_TYPE_INT, bpp, "cformat", G_TYPE_INT, cformat,
++      NULL);
++#else
+   /* image sizes sanity check */
+   GST_LOG ("w=%u, h=%u, planes=%u, bpp=%u", w, h, planes, bpp);
+   if (w == 0 || w > 0xfffff || h == 0 || h > 0xfffff || planes != 1 ||
+@@ -4248,6 +4365,7 @@ bmp_type_find (GstTypeFind * tf, gpointer unused)
+   gst_type_find_suggest_simple (tf, GST_TYPE_FIND_MAXIMUM, "image/bmp",
+       "width", G_TYPE_INT, w, "height", G_TYPE_INT, h, "bpp", G_TYPE_INT, bpp,
+       NULL);
++#endif
+ }
+ 
+ /*** image/tiff ***/
+@@ -5993,6 +6111,10 @@ GST_TYPE_FIND_REGISTER_DEFINE (mp3, "audio/mpeg", GST_RANK_PRIMARY,
+     mp3_type_find, "mp3,mp2,mp1,mpga", MP3_CAPS, NULL, NULL);
+ GST_TYPE_FIND_REGISTER_DEFINE (ac3, "audio/x-ac3", GST_RANK_PRIMARY,
+     ac3_type_find, "ac3,eac3", AC3_CAPS, NULL, NULL);
++#ifdef TCL_PATCH
++GST_TYPE_FIND_REGISTER_DEFINE (ac4, "audio/x-ac4", GST_RANK_PRIMARY,
++    ac4_type_find, "ac4", AC4_CAPS, NULL, NULL);
++#endif
+ GST_TYPE_FIND_REGISTER_DEFINE (dts, "audio/x-dts", GST_RANK_SECONDARY,
+     dts_type_find, "dts", DTS_CAPS, NULL, NULL);
+ GST_TYPE_FIND_REGISTER_DEFINE (gsm, "audio/x-gsm", GST_RANK_PRIMARY, NULL,
+@@ -6060,17 +6182,24 @@ GST_TYPE_FIND_REGISTER_DEFINE (uri, "text/uri-list", GST_RANK_MARGINAL,
+     uri_type_find, "ram", URI_CAPS, NULL, NULL);
+ GST_TYPE_FIND_REGISTER_DEFINE (itc, "application/itc", GST_RANK_SECONDARY,
+     itc_type_find, "itc", ITC_CAPS, NULL, NULL);
++#ifdef TCL_PATCH
++GST_TYPE_FIND_REGISTER_DEFINE (hls, "application/x-hls", GST_RANK_PRIMARY,
++    hls_type_find, "m3u8", HLS_CAPS, NULL, NULL);
++#else
+ GST_TYPE_FIND_REGISTER_DEFINE (hls, "application/x-hls", GST_RANK_MARGINAL,
+     hls_type_find, "m3u8", HLS_CAPS, NULL, NULL);
++#endif
+ GST_TYPE_FIND_REGISTER_DEFINE (sdp, "application/sdp", GST_RANK_SECONDARY,
+     sdp_type_find, "sdp", SDP_CAPS, NULL, NULL);
+ GST_TYPE_FIND_REGISTER_DEFINE (smil, "application/smil", GST_RANK_SECONDARY,
+     smil_type_find, "smil", SMIL_CAPS, NULL, NULL);
++#ifndef TCL_PATCH
+ GST_TYPE_FIND_REGISTER_DEFINE (ttml_xml, "application/ttml+xml",
+     GST_RANK_SECONDARY, ttml_xml_type_find, "ttml+xml", TTML_XML_CAPS, NULL,
+     NULL);
+ GST_TYPE_FIND_REGISTER_DEFINE (xml, "application/xml", GST_RANK_MARGINAL,
+     xml_type_find, "xml", GENERIC_XML_CAPS, NULL, NULL);
++#endif
+ GST_TYPE_FIND_REGISTER_DEFINE (aiff, "audio/x-aiff", GST_RANK_SECONDARY,
+     aiff_type_find, "aiff,aif,aifc", AIFF_CAPS, NULL, NULL);
+ GST_TYPE_FIND_REGISTER_DEFINE (svx, "audio/x-svx", GST_RANK_SECONDARY,
+@@ -6170,8 +6299,10 @@ GST_TYPE_FIND_REGISTER_DEFINE (degas, "image/x-degas", GST_RANK_MARGINAL,
+     degas_type_find, NULL, NULL, NULL, NULL);
+ GST_TYPE_FIND_REGISTER_DEFINE (dvdiso, "application/octet-stream",
+     GST_RANK_MARGINAL, dvdiso_type_find, NULL, NULL, NULL, NULL);
++#ifndef TCL_PATCH
+ GST_TYPE_FIND_REGISTER_DEFINE (ssa, "application/x-ssa", GST_RANK_SECONDARY,
+     ssa_type_find, "ssa,ass", NULL, NULL, NULL);
++#endif
+ GST_TYPE_FIND_REGISTER_DEFINE (pva, "video/x-pva", GST_RANK_SECONDARY,
+     pva_type_find, "pva", PVA_CAPS, NULL, NULL);
+ GST_TYPE_FIND_REGISTER_DEFINE (aa, "audio/audible", GST_RANK_MARGINAL,
+diff --git a/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsplugin.c b/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsplugin.c
+index c0e386aa2a..636f0de4ef 100644
+--- a/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsplugin.c
++++ b/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsplugin.c
+@@ -57,7 +57,9 @@ plugin_init (GstPlugin * plugin)
+ #if 0
+   GST_TYPE_FIND_REGISTER (smoke, plugin);
+ #endif
++#ifndef TCL_PATCH
+   GST_TYPE_FIND_REGISTER (rmf, plugin);
++#endif
+   GST_TYPE_FIND_REGISTER (ram, plugin);
+   GST_TYPE_FIND_REGISTER (flv, plugin);
+   GST_TYPE_FIND_REGISTER (nist, plugin);
+@@ -113,6 +115,9 @@ plugin_init (GstPlugin * plugin)
+   GST_TYPE_FIND_REGISTER (mod, plugin);
+   GST_TYPE_FIND_REGISTER (mp3, plugin);
+   GST_TYPE_FIND_REGISTER (ac3, plugin);
++#ifdef TCL_PATCH
++  GST_TYPE_FIND_REGISTER (ac4, plugin);
++#endif
+   GST_TYPE_FIND_REGISTER (dts, plugin);
+   GST_TYPE_FIND_REGISTER (gsm, plugin);
+   GST_TYPE_FIND_REGISTER (mpeg_sys, plugin);
+@@ -148,8 +153,10 @@ plugin_init (GstPlugin * plugin)
+   GST_TYPE_FIND_REGISTER (hls, plugin);
+   GST_TYPE_FIND_REGISTER (sdp, plugin);
+   GST_TYPE_FIND_REGISTER (smil, plugin);
++#ifndef TCL_PATCH
+   GST_TYPE_FIND_REGISTER (ttml_xml, plugin);
+   GST_TYPE_FIND_REGISTER (xml, plugin);
++#endif
+   GST_TYPE_FIND_REGISTER (aiff, plugin);
+   GST_TYPE_FIND_REGISTER (svx, plugin);
+   GST_TYPE_FIND_REGISTER (paris, plugin);
+@@ -199,7 +206,9 @@ plugin_init (GstPlugin * plugin)
+ #endif
+   GST_TYPE_FIND_REGISTER (degas, plugin);
+   GST_TYPE_FIND_REGISTER (dvdiso, plugin);
++#ifndef TCL_PATCH
+   GST_TYPE_FIND_REGISTER (ssa, plugin);
++#endif
+   GST_TYPE_FIND_REGISTER (pva, plugin);
+   GST_TYPE_FIND_REGISTER (aa, plugin);
+   GST_TYPE_FIND_REGISTER (tap, plugin);
+diff --git a/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsstartwith.c b/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsstartwith.c
+index 14092e9cc8..e45436ba36 100644
+--- a/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsstartwith.c
++++ b/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsstartwith.c
+@@ -86,8 +86,10 @@ TYPE_FIND_REGISTER_START_WITH_DEFINE (scc, "application/x-scc",
+ TYPE_FIND_REGISTER_START_WITH_DEFINE (smoke, "video/x-smoke",
+     GST_RANK_PRIMARY, NULL, "\x80smoke\x00\x01\x00", 6, GST_TYPE_FIND_MAXIMUM);
+ #endif
++#ifndef TCL_PATCH
+ TYPE_FIND_REGISTER_START_WITH_DEFINE (rmf, "application/vnd.rn-realmedia",
+     GST_RANK_SECONDARY, "ra,ram,rm,rmvb", ".RMF", 4, GST_TYPE_FIND_MAXIMUM);
++#endif
+ TYPE_FIND_REGISTER_START_WITH_DEFINE (ram, "application/x-pn-realaudio",
+     GST_RANK_SECONDARY, "ra,ram,rm,rmvb", ".ra\375", 4, GST_TYPE_FIND_MAXIMUM);
+ TYPE_FIND_REGISTER_START_WITH_DEFINE (flv, "video/x-flv",
+diff --git a/subprojects/gst-plugins-base/meson.build b/subprojects/gst-plugins-base/meson.build
+index 555e5192b3..2dfd98a34c 100644
+--- a/subprojects/gst-plugins-base/meson.build
++++ b/subprojects/gst-plugins-base/meson.build
+@@ -361,14 +361,14 @@ orc_targets = []
+ orc_dep = dependency('orc-0.4', version : orc_req, required : get_option('orc'),
+     fallback : ['orc', 'orc_dep'])
+ orcc = find_program('orcc', required : get_option('orc'))
+-if orc_dep.found() and orcc.found()
+-  have_orcc = true
+-  orcc_args = [orcc, '--include', 'glib.h']
+-  core_conf.set('HAVE_ORC', 1)
+-else
++#if orc_dep.found() and orcc.found()
++#  have_orcc = true
++#  orcc_args = [orcc, '--include', 'glib.h']
++#  core_conf.set('HAVE_ORC', 1)
++#else
+   message('Orc Compiler not found or disabled, will use backup C code')
+   core_conf.set('DISABLE_ORC', 1)
+-endif
++#endif
+ 
+ # Used to build SSE* things in audio-resampler
+ sse_args = '-msse'
+-- 
+2.25.1
+

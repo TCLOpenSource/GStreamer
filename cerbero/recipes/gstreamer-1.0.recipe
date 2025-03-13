@@ -6,6 +6,9 @@ class Recipe(custom.GStreamer):
     btype = BuildType.MESON
     tarball_checksum = '0545b030960680f71a95f9d39c95daae54b4d317d335e8f239d81138773c9b90'
     deps = ['glib']
+    patches = [
+        name + '/0001-TCL-modifications-for-gstreamer.patch',
+    ]
     bash_completions = ['gst-inspect-1.0', 'gst-launch-1.0']
 
     files_bins = ['gst-inspect-1.0',

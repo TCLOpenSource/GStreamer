@@ -1,0 +1,721 @@
+From 317c23e24bfa21effe505dc33faa26de13bcdccd Mon Sep 17 00:00:00 2001
+From: TCLCode <opensource@tcl.com>
+Date: Thu, 6 Mar 2025 10:26:54 +0800
+Subject: [PATCH] TCL modifications for gst-libav
+
+---
+ .../gst-libav/ext/libav/gstavcodecmap.c       |  51 ++-
+ subprojects/gst-libav/ext/libav/gstavdemux.c  | 371 +++++++++++++++++-
+ .../gst-libav/ext/libav/gstavprotocol.c       |   5 +
+ 3 files changed, 420 insertions(+), 7 deletions(-)
+
+diff --git a/subprojects/gst-libav/ext/libav/gstavcodecmap.c b/subprojects/gst-libav/ext/libav/gstavcodecmap.c
+index df3aa6bc18..e7a6e35152 100644
+--- a/subprojects/gst-libav/ext/libav/gstavcodecmap.c
++++ b/subprojects/gst-libav/ext/libav/gstavcodecmap.c
+@@ -35,6 +35,9 @@
+ #include <gst/video/video.h>
+ #include <gst/audio/audio.h>
+ #include <gst/pbutils/codec-utils.h>
++#ifdef TCL_PATCH
++#include <sys/system_properties.h>
++#endif
+
+ /* IMPORTANT: Keep this sorted by the ffmpeg channel masks */
+ static const struct
+@@ -429,6 +432,11 @@ gst_ff_vid_caps_new (AVCodecContext * context, AVCodec * codec,
+     caps = gst_caps_new_empty_simple (mimetype);
+   }
+
++#ifdef TCL_PATCH
++  if (codec_id == AV_CODEC_ID_CAVS) {
++    gst_caps_set_simple (caps, "parsed", G_TYPE_BOOLEAN, TRUE, NULL);
++  }
++#endif
+   va_start (var_args, fieldname);
+   gst_caps_set_simple_valist (caps, fieldname, var_args);
+   va_end (var_args);
+@@ -953,10 +961,25 @@ gst_ffmpeg_codecid_to_caps (enum AVCodecID codec_id,
+       break;
+
+     case AV_CODEC_ID_TRUEHD:
++#ifdef TCL_PATCH
++    {
++        char supportDolbyTrueHD[128];
++        memset(supportDolbyTrueHD, 0, 128);
++        __system_property_get("persist.tcl.feature.uniplayer.supportDolbyTrueHD", supportDolbyTrueHD);
++        GST_ERROR ("persist.tcl.feature.uniplayer.supportDolbyTrueHD = %s", supportDolbyTrueHD);
++        if (!strncmp(supportDolbyTrueHD, "true", 4)) {
++            caps = gst_ff_aud_caps_new (context, NULL, codec_id, encode, "audio/x-true-hd", NULL);
++        } else {
++            GST_DEBUG ("Unknown codec ID %d, please add mapping here", codec_id);
++        }
++      break;
++    }
++#else
+       caps =
+           gst_ff_aud_caps_new (context, NULL, codec_id, encode,
+           "audio/x-true-hd", NULL);
+       break;
++#endif
+
+     case AV_CODEC_ID_ATRAC1:
+       caps =
+@@ -1328,6 +1351,10 @@ gst_ffmpeg_codecid_to_caps (enum AVCodecID codec_id,
+         g_value_unset (&item);
+         gst_caps_set_value (caps, "stream-format", &arr);
+         g_value_unset (&arr);
++#ifdef TCL_PATCH
++        GstStructure *st = gst_structure_new_empty ("video/x-h265-soft");
++        gst_caps_append_structure (caps, st);
++#endif
+       } else if (context) {
+         /* FIXME: ffmpeg currently assumes HVC1 if there is extradata and
+          * byte-stream otherwise. See for example the MOV or MPEG-TS code.
+@@ -2349,6 +2376,13 @@ gst_ffmpeg_codecid_to_caps (enum AVCodecID codec_id,
+           gst_ff_vid_caps_new (context, NULL, codec_id, encode, "video/x-av1",
+           NULL);
+       break;
++#ifdef TCL_PATCH
++    case AV_CODEC_ID_AVS2:
++     caps =
++         gst_ff_vid_caps_new (context, NULL, codec_id, encode, "video/x-gst-fourcc-avs2",
++         NULL);
++     break;
++#endif
+     default:
+       GST_DEBUG ("Unknown codec ID %d, please add mapping here", codec_id);
+       break;
+@@ -3545,7 +3579,13 @@ gst_ffmpeg_formatid_to_caps (const gchar * format_name)
+         "systemstream", G_TYPE_BOOLEAN, TRUE, NULL);
+   } else if (!strcmp (format_name, "4xm")) {
+     caps = gst_caps_new_empty_simple ("video/x-4xm");
++#ifdef TCL_PATCH
++  } else if ((!strcmp (format_name, "matroska")) ||
++      (!strcmp (format_name, "matroska,webm")) ||
++      (!strcmp (format_name, "matroska_webm"))) {
++#elif
+   } else if (!strcmp (format_name, "matroska")) {
++#endif
+     caps = gst_caps_new_empty_simple ("video/x-matroska");
+   } else if (!strcmp (format_name, "ivf")) {
+     caps = gst_caps_new_empty_simple ("video/x-ivf");
+@@ -3577,7 +3617,11 @@ gst_ffmpeg_formatid_to_caps (const gchar * format_name)
+     caps = gst_caps_from_string ("video/quicktime,variant=(string)ipod");
+   } else if (!strcmp (format_name, "aac")) {
+     caps = gst_caps_new_simple ("audio/mpeg",
++#ifdef TCL_PATCH
++        "mpegversion", G_TYPE_INT, 400, NULL);
++#else
+         "mpegversion", G_TYPE_INT, 4, NULL);
++#endif
+   } else if (!strcmp (format_name, "gif")) {
+     caps = gst_caps_from_string ("image/gif");
+   } else if (!strcmp (format_name, "ogg")) {
+@@ -4352,7 +4396,12 @@ gst_ffmpeg_caps_to_codecid (const GstCaps * caps, AVCodecContext * context)
+   } else if (!strcmp (mimetype, "video/x-h264")) {
+     id = AV_CODEC_ID_H264;
+     video = TRUE;
+-  } else if (!strcmp (mimetype, "video/x-h265")) {
++
++  } else if (!strcmp (mimetype, "video/x-h265")
++#ifdef TCL_PATCH
++    || !strcmp (mimetype, "video/x-h265-soft")
++#endif
++    ) {
+     id = AV_CODEC_ID_HEVC;
+     video = TRUE;
+   } else if (!strcmp (mimetype, "video/x-flash-video")) {
+diff --git a/subprojects/gst-libav/ext/libav/gstavdemux.c b/subprojects/gst-libav/ext/libav/gstavdemux.c
+index 37de3faffb..1b7d71c60c 100644
+--- a/subprojects/gst-libav/ext/libav/gstavdemux.c
++++ b/subprojects/gst-libav/ext/libav/gstavdemux.c
+@@ -98,6 +98,16 @@ struct _GstFFMpegDemux
+   GstFFMpegPipe ffpipe;
+   GstTask *task;
+   GRecMutex task_lock;
++
++#ifdef TCL_PATCH
++  gboolean is_special_stream;
++  gboolean audio_skip;
++  gboolean video_skip;
++  gint64 last_audio_timestamp;
++  gint64 last_video_timestamp;
++  gint64 audio_min;
++  gint64 video_min;
++#endif
+ };
+
+ typedef struct _GstFFMpegDemuxClass GstFFMpegDemuxClass;
+@@ -296,6 +306,16 @@ gst_ffmpegdemux_init (GstFFMpegDemux * demux)
+     demux->can_push = TRUE;
+   else
+     demux->can_push = FALSE;
++
++#ifdef TCL_PATCH
++  demux->audio_skip = FALSE;
++  demux->video_skip = FALSE;
++  demux->is_special_stream = FALSE;
++  demux->last_audio_timestamp = 0;
++  demux->last_video_timestamp = 0;
++  demux->audio_min = 0;
++  demux->video_min = 0;
++#endif
+ }
+
+ static void
+@@ -468,7 +488,7 @@ gst_ffmpegdemux_do_seek (GstFFMpegDemux * demux, GstSegment * segment)
+   GST_LOG_OBJECT (demux, "do seek to time %" GST_TIME_FORMAT,
+       GST_TIME_ARGS (target));
+
+-  /* if we need to land on a keyframe, try to do so, we don't try to do a
++  /* if we need to land on a keyframe, try to do so, we don't try to do a
+    * keyframe seek if we are not absolutely sure we have an index.*/
+   if (segment->flags & GST_SEEK_FLAG_KEY_UNIT) {
+     gint keyframeidx;
+@@ -610,6 +630,15 @@ gst_ffmpegdemux_perform_seek (GstFFMpegDemux * demux, GstEvent * event)
+   if (flush) {
+     GST_OBJECT_LOCK (demux);
+     demux->flushing = FALSE;
++
++#ifdef TCL_PATCH
++    demux->audio_skip = FALSE;
++    demux->video_skip = FALSE;
++    demux->last_audio_timestamp = 0;
++    demux->last_video_timestamp = 0;
++    demux->audio_min = 0;
++    demux->video_min = 0;
++#endif
+     GST_OBJECT_UNLOCK (demux);
+     gst_pad_push_event (demux->sinkpad, gst_event_new_flush_stop (TRUE));
+   }
+@@ -928,15 +957,39 @@ gst_ffmpegdemux_get_stream (GstFFMpegDemux * demux, AVStream * avstream)
+   gchar *padname;
+   const gchar *codec;
+   AVCodecContext *ctx = NULL;
++
++#ifdef TCL_PATCH
++  GstFFStream *stream = NULL;
++#else
+   GstFFStream *stream;
++#endif
+   GstEvent *event;
+   gchar *stream_id;
+
++#ifdef TCL_PATCH
++  if (avstream && avstream->codecpar) {
++    if (avstream->codecpar->codec_type == AVMEDIA_TYPE_AUDIO && avstream->codecpar->codec_id == AV_CODEC_ID_MP2 && avstream->codecpar->channels == 0 && avstream->codecpar->sample_rate == 0) {
++        GST_ERROR("invaild mpeg2 audio stream");
++        goto exists;
++    }
++  }
++#endif
++
+   oclass = (GstFFMpegDemuxClass *) G_OBJECT_GET_CLASS (demux);
+
++#ifdef TCL_PATCH
++  if (avstream->index >= MAX_STREAMS)
++    goto exists;
++#endif
++
+   if (demux->streams[avstream->index] != NULL)
+     goto exists;
+
++#ifdef TCL_PATCH
++  if (demux->streams[avstream->index] == NULL && demux->opened == TRUE && (avstream->codecpar->codec_id == AV_CODEC_ID_MP2 || avstream->codecpar->codec_id == AV_CODEC_ID_MP3))
++    goto exists;
++#endif
++
+   ctx = avcodec_alloc_context3 (NULL);
+   avcodec_parameters_to_context (ctx, avstream->codecpar);
+
+@@ -1032,6 +1085,50 @@ gst_ffmpegdemux_get_stream (GstFFMpegDemux * demux, AVStream * avstream)
+   gst_pad_push_event (pad, event);
+   g_free (stream_id);
+
++#ifdef TCL_PATCH
++  const GValue *value;
++  GstStructure *structure;
++  structure = gst_caps_get_structure (caps, 0);
++  value = gst_structure_get_value (structure, "codec_data");
++  if (!value && ctx->codec_id == AV_CODEC_ID_AAC) {
++    GST_INFO("aac without codec data, skip aacparser.");
++    gst_caps_set_simple (caps, "framed", G_TYPE_BOOLEAN, TRUE, NULL);
++  }
++
++  if (value && avstream->codec && avstream->codec->has_b_frames && avstream->codecpar->codec_id == AV_CODEC_ID_MPEG2VIDEO) {
++    char str[400];
++    GstBuffer *codec_data   = NULL;
++    codec_data = gst_value_get_buffer (value);
++    gint size;
++    guint8 *data;
++    GstMapInfo map;
++    gst_buffer_map (codec_data, &map, GST_MAP_READ);
++    data = map.data;
++    size = map.size;
++    if (size < 200) {
++        for (int i = 0; i < size; i++)
++            sprintf(str + 2 * i, "%02x", data[i]);
++
++        GST_ERROR("str_codec_: %s   size = %d", str, size);
++        if (!strncmp (str, "000001b32d01e03416cb238110111112121213131313141414141415151515151516161616161616171717171717171718181818181818191a191a1a191b1b1b1a1b1c1c1c1c1e1e1e1f1f21000001b5148200010000", 172) ||
++            !strncmp (str, "000001b32d01e02417ed23821020202620262c2c2c2c2c2c343034363636343434343636363a3a3a4444443a3a3a36363a3a404044444a4c4a464644464c4c50505060605c5c7070748a8aa710111112121213131313141414141415151515151516161616161616171717171717171718181819181818191a1a1a1a191b1b1b1b1b1c1c1c1c1e1e1e1f1f21000001b5148200010000000001b5210606060b420f00", 324)) {
++            GST_ERROR("codec_data is SpecialStream !!!");
++            demux->is_special_stream = TRUE;
++        }
++    }
++    gst_buffer_unmap (codec_data, &map);
++  }
++#endif
++
++#ifdef TCL_PATCH
++  if (caps && avstream->codec && avstream->codec->has_b_frames &&
++      (avstream->codecpar->codec_id == AV_CODEC_ID_MPEG2VIDEO ||
++      avstream->codecpar->codec_id == AV_CODEC_ID_MPEG1VIDEO ||
++      avstream->codecpar->codec_id == AV_CODEC_ID_H264)) {
++    gst_caps_set_simple (caps, "ignore_invalid_pts", G_TYPE_BOOLEAN, TRUE, NULL);
++  }
++#endif
++
+   GST_INFO_OBJECT (pad, "adding pad with caps %" GST_PTR_FORMAT, caps);
+   gst_pad_set_caps (pad, caps);
+   gst_caps_unref (caps);
+@@ -1051,6 +1148,18 @@ gst_ffmpegdemux_get_stream (GstFFMpegDemux * demux, AVStream * avstream)
+         (ctx->codec_type == AVMEDIA_TYPE_VIDEO) ?
+         GST_TAG_VIDEO_CODEC : GST_TAG_AUDIO_CODEC, codec, NULL);
+   }
++#ifdef TCL_PATCH
++   else {
++      if (stream->tags == NULL)
++        stream->tags = gst_tag_list_new_empty ();
++
++      const GstStructure* st = gst_caps_get_structure(caps, 0);
++      const gchar *codec = gst_structure_get_name(st);
++      if(ctx->codec_type == AVMEDIA_TYPE_VIDEO)
++          gst_tag_list_add (stream->tags, GST_TAG_MERGE_REPLACE,
++          GST_TAG_VIDEO_CODEC, codec, NULL);
++  }
++#endif
+
+ done:
+   if (ctx)
+@@ -1061,7 +1170,14 @@ done:
+ exists:
+   {
+     GST_DEBUG_OBJECT (demux, "Pad existed (stream %d)", avstream->index);
++#ifdef TCL_PATCH
++    if (avstream->index >= MAX_STREAMS)
++      stream = NULL;
++    else
++      stream = demux->streams[avstream->index];
++#else
+     stream = demux->streams[avstream->index];
++#endif
+     goto done;
+   }
+ unknown_type:
+@@ -1072,6 +1188,14 @@ unknown_type:
+ unknown_caps:
+   {
+     GST_WARNING_OBJECT (demux, "Unknown caps for codec %d", ctx->codec_id);
++#ifdef TCL_PATCH
++    if (AV_CODEC_ID_TRUEHD == ctx->codec_id) {
++        GstStructure* st = NULL;
++        st = gst_structure_new("out-of-spec",
++            "is-out-spec", G_TYPE_BOOLEAN, TRUE, "copyright-risk" ,G_TYPE_BOOLEAN, TRUE, NULL);
++        gst_element_post_message (GST_ELEMENT_CAST (demux), gst_message_new_custom (GST_MESSAGE_INFO, GST_OBJECT(demux), st));
++    }
++#endif
+     goto done;
+   }
+ }
+@@ -1216,6 +1340,103 @@ gst_ffmpeg_metadata_to_tag_list (AVDictionary * metadata)
+   return list;
+ }
+
++#if 0//def TCL_PATCH
++static uint32_t
++get_sample_rate(const uint8_t sf_index)
++{
++    static const uint32_t sample_rates[] =
++    {
++        96000, 88200, 64000, 48000, 44100, 32000,
++        24000, 22050, 16000, 12000, 11025, 8000
++    };
++
++    if (sf_index < sizeof(sample_rates) / sizeof(sample_rates[0])) {
++        return sample_rates[sf_index];
++    }
++
++    return 0;
++}
++
++static size_t
++getAdtsFrameLength(AVIOContext *source, uint64_t offset, size_t* headerSize)
++{
++    const size_t kAdtsHeaderLengthNoCrc = 7;
++    const size_t kAdtsHeaderLengthWithCrc = 9;
++
++    size_t frameSize = 0;
++    unsigned char syncword[2];
++    avio_seek(source, offset, SEEK_SET);
++    if (avio_read(source, &syncword, 2) != 2) {
++        return 0;
++    }
++    if ((syncword[0] != 0xff) || ((syncword[1] & 0xf6) != 0xf0)) {
++        return 0;
++    }
++
++    unsigned char protectionAbsent;
++    avio_seek(source, offset +1, SEEK_SET);
++    if (avio_read(source, &protectionAbsent, 1) < 1) {
++        return 0;
++    }
++    protectionAbsent &= 0x1;
++
++    unsigned char header[3];
++    avio_seek(source, offset +3, SEEK_SET);
++    if (avio_read(source, &header, 3) < 3) {
++        return 0;
++    }
++
++    frameSize = (header[0] & 0x3) << 11 | header[1] << 3 | header[2] >> 5;
++
++    // protectionAbsent is 0 if there is CRC
++    size_t headSize = protectionAbsent ? kAdtsHeaderLengthNoCrc : kAdtsHeaderLengthWithCrc;
++    if (headSize > frameSize) {
++        return 0;
++    }
++    if (headerSize != NULL) {
++        *headerSize = headSize;
++    }
++
++    return frameSize;
++}
++
++static uint64_t gst_ffmpegdemux_aac_comput_duration (AVIOContext *iocontext)
++{
++  uint64_t offset = 0, streamSize = 0, numFrames = 0, mFrameDurationUs = 0, duration = 0;
++  size_t frameSize = 0;
++  uint8_t sf_index, header[2];
++  avio_seek(iocontext, 2, SEEK_SET);
++  if (avio_read(iocontext, &header, 2) < 2) {
++      avio_seek(iocontext, 0, SEEK_SET);
++      return -1;
++  }
++  avio_seek(iocontext, 0, SEEK_SET);
++  sf_index = (header[0] >> 2) & 0xf;
++  uint32_t sr = get_sample_rate(sf_index);
++  if (sr == 0) {
++      GST_INFO("Unsupported AAC Sample Rate");
++      return -1;
++  }
++
++  while (!avio_feof(iocontext)) {
++      if ((frameSize = getAdtsFrameLength(iocontext, offset, NULL)) == 0) {
++          streamSize = offset;
++          GST_INFO("prematured AAC stream (%lld vs %lld)", (long long)offset, (long long)streamSize);
++          break;
++      }
++      offset += frameSize;
++      numFrames ++;
++  }
++  GST_INFO("streamSize = %lld, numFrames = %lld  ", streamSize, numFrames);
++  avio_seek(iocontext, 0, SEEK_SET);
++
++  mFrameDurationUs = (1024 * 1000000ll + (sr - 1)) / sr;
++  duration = numFrames * mFrameDurationUs;
++  GST_INFO("duration = %lld", duration);
++  return duration;
++}
++#endif
++
+ static gboolean
+ gst_ffmpegdemux_open (GstFFMpegDemux * demux)
+ {
+@@ -1272,6 +1493,19 @@ gst_ffmpegdemux_open (GstFFMpegDemux * demux)
+   if (res < 0)
+     goto beach;
+
++#if 0//def TCL_PATCH
++  if (demux->context->nb_streams == 1) {// only audio for aac
++    int codec_id = demux->context->streams[0]->codecpar->codec_id;
++    if (codec_id == AV_CODEC_ID_AAC || codec_id == AV_CODEC_ID_AAC_LATM) {// AV_CODEC_ID_AAC:86018, AV_CODEC_ID_AAC_LATM:86065
++        GST_INFO("codec_type = %d", codec_id);
++        int64_t duration = gst_ffmpegdemux_aac_comput_duration(iocontext);
++        if (duration > 0)
++            demux->context->duration = duration;
++    }
++  }
++#endif
++
++  //if demux->context->duration was assigned, it will not be assigned in gst_ffmpeg_av_find_stream_info.
+   res = gst_ffmpeg_av_find_stream_info (demux->context);
+   GST_DEBUG_OBJECT (demux, "av_find_stream_info returned %d", res);
+   if (res < 0)
+@@ -1282,9 +1516,16 @@ gst_ffmpegdemux_open (GstFFMpegDemux * demux)
+
+   /* open_input_file() automatically reads the header. We can now map each
+    * created AVStream to a GstPad to make GStreamer handle it. */
++
++#ifdef TCL_PATCH
++  for (i = 0; i < n_streams && i < MAX_STREAMS; i++) {
++    gst_ffmpegdemux_get_stream (demux, demux->context->streams[i]);
++  }
++#else
+   for (i = 0; i < n_streams; i++) {
+     gst_ffmpegdemux_get_stream (demux, demux->context->streams[i]);
+   }
++#endif
+
+   gst_element_no_more_pads (GST_ELEMENT (demux));
+
+@@ -1336,10 +1577,21 @@ gst_ffmpegdemux_open (GstFFMpegDemux * demux)
+   }
+
+   /* now handle the stream tags */
+-  for (i = 0; i < n_streams; i++) {
++
++#ifdef TCL_PATCH
++  for (i = 0; i < n_streams && i < MAX_STREAMS; i++)
++#else
++  for (i = 0; i < n_streams; i++)
++#endif
++{
+     GstFFStream *stream;
+
+     stream = gst_ffmpegdemux_get_stream (demux, demux->context->streams[i]);
++
++#ifdef TCL_PATCH
++    if (!stream)
++        continue;
++#endif
+     if (stream->pad != NULL) {
+
+       /* Global tags */
+@@ -1417,7 +1669,11 @@ gst_ffmpegdemux_type_find (GstTypeFind * tf, gpointer priv)
+
+       sinkcaps = gst_ffmpeg_formatid_to_caps (in_plugin->name);
+
+-      GST_LOG ("libav typefinder '%s' suggests %" GST_PTR_FORMAT ", p=%u%%",
++#ifdef TCL_PATCH
++      if (!strcmp (in_plugin->name, "aac"))
++          res = 100;
++#endif
++      GST_INFO ("libav typefinder '%s' suggests %" GST_PTR_FORMAT ", p=%u%%",
+           in_plugin->name, sinkcaps, res);
+
+       gst_type_find_suggest (tf, res, sinkcaps);
+@@ -1461,15 +1717,22 @@ gst_ffmpegdemux_loop (GstFFMpegDemux * demux)
+       demux->context->streams[pkt.stream_index]);
+
+   /* check if we know the stream */
++
++#ifdef TCL_PATCH
++  if (!stream)
++    goto done;
++#endif
+   if (stream->unknown)
+     goto done;
+
++
+   /* get more stuff belonging to this stream */
+   avstream = stream->avstream;
+
+   /* do timestamps, we do this first so that we can know when we
+    * stepped over the segment stop position. */
+   pts = pkt.pts;
++
+   if (G_UNLIKELY (pts < 0)) {
+     /* some streams have pts such this:
+      * 0
+@@ -1479,12 +1742,78 @@ gst_ffmpegdemux_loop (GstFFMpegDemux * demux)
+      *
+      * we reset pts to 0 since for us timestamp are unsigned
+      */
+-    GST_WARNING_OBJECT (demux,
++    GST_DEBUG_OBJECT (demux,
+         "negative pts detected: %" G_GINT64_FORMAT " resetting to 0", pts);
+-    pts = 0;
++#ifdef TCL_PATCH
++    if (avstream->codecpar->codec_id != AV_CODEC_ID_MPEG2VIDEO &&
++        avstream->codecpar->codec_id != AV_CODEC_ID_MPEG1VIDEO &&
++        avstream->codecpar->codec_id != AV_CODEC_ID_H264 &&
++        !avstream->codec->has_b_frames)
++#endif
++      pts = 0;
+   }
+   timestamp = gst_ffmpeg_time_ff_to_gst (pts, avstream->time_base);
++
++#ifdef TCL_PATCH
++#define AUDIO_ "AVMEDIA_TYPE_AUDIO"
++#define VIDEO_ "AVMEDIA_TYPE_VIDEO"
++
++//  if (demux->duration == 28759011000 || demux->duration == 29120000000) {
++  if (demux->is_special_stream) {
++      int codec_type = (int)avstream->codecpar->codec_type;
++      if (demux->last_audio_timestamp > 27000000000 && (int64_t)timestamp > 0 && (int64_t)timestamp < 300000000 && codec_type == AVMEDIA_TYPE_AUDIO) {
++          demux->audio_skip = TRUE;
++          GST_ERROR_OBJECT (demux, "AA_timestamp :%lld pts: %lld", timestamp, pts);
++      }
++      if (demux->last_video_timestamp > 27000000000 && (int64_t)timestamp > 0 && (int64_t)timestamp < 300000000 && codec_type == AVMEDIA_TYPE_VIDEO) {
++          demux->video_skip = TRUE;
++          GST_ERROR_OBJECT (demux, "AA_timestamp :%lld pts: %lld", timestamp, pts);
++      }
++      if ((int64_t)timestamp >= 0) {
++          gint64 temp_pts = timestamp;
++          if (demux->audio_skip && codec_type == AVMEDIA_TYPE_AUDIO) {
++            // GST_ERROR_OBJECT (demux, "AA_%s timestamp :%lld last_timestamp_: %lld", (codec_type == AVMEDIA_TYPE_VIDEO)?VIDEO_:AUDIO_, timestamp, demux->last_audio_timestamp);
++            if (temp_pts < demux->audio_min) {
++              demux->audio_min = 0;
++            }
++            timestamp = demux->last_audio_timestamp + timestamp - demux->audio_min;
++            if ((int64_t)temp_pts >= demux->audio_min) {
++              demux->audio_min = temp_pts;
++            }
++          }
++          if (demux->video_skip && codec_type == AVMEDIA_TYPE_VIDEO) {
++            // GST_ERROR_OBJECT (demux, "AA_%s timestamp :%lld last_timestamp_: %lld", (codec_type == AVMEDIA_TYPE_VIDEO)?VIDEO_:AUDIO_, timestamp, demux->last_video_timestamp);
++            if (temp_pts < demux->video_min) {
++              demux->video_min = 0;
++            }
++            timestamp = demux->last_video_timestamp + timestamp - demux->video_min;
++            if ((int64_t)temp_pts >= demux->video_min) {
++              demux->video_min = temp_pts;
++            }
++          }
++          if (codec_type == AVMEDIA_TYPE_AUDIO) {
++            demux->last_audio_timestamp = timestamp;
++          }
++          if (codec_type == AVMEDIA_TYPE_VIDEO) {
++            demux->last_video_timestamp = timestamp;
++          }
++          // GST_ERROR_OBJECT (demux, "AA_%s timestamp :%lld last_timestamp_: %lld", (codec_type == AVMEDIA_TYPE_VIDEO)?VIDEO_:AUDIO_, timestamp, (codec_type == AVMEDIA_TYPE_VIDEO)?demux->last_video_timestamp:demux->last_audio_timestamp);
++      }
++  }
++#endif
++
+   if (GST_CLOCK_TIME_IS_VALID (timestamp)) {
++
++#ifdef TCL_PATCH
++        if (timestamp == 0 &&
++            (avstream->codecpar->codec_id == AV_CODEC_ID_H264 ||
++            avstream->codecpar->codec_id == AV_CODEC_ID_MPEG2VIDEO ||
++            avstream->codecpar->codec_id == AV_CODEC_ID_MPEG1VIDEO) &&
++            avstream->r_frame_rate.num != 0) {
++            timestamp = stream->last_ts + 1000000000 * avstream->r_frame_rate.den / avstream->r_frame_rate.num;
++        }
++
++#endif
+     stream->last_ts = timestamp;
+   }
+   duration = gst_ffmpeg_time_ff_to_gst (pkt.duration, avstream->time_base);
+@@ -1509,7 +1838,11 @@ gst_ffmpegdemux_loop (GstFFMpegDemux * demux)
+   if (GST_CLOCK_TIME_IS_VALID (timestamp)) {
+     /* start_time should be the ts of the first frame but it may actually be
+      * higher because of rounding when converting to gst ts. */
++#ifdef TCL_PATCH
++    if (demux->start_time != -1 && demux->start_time >= timestamp)
++#else
+     if (demux->start_time >= timestamp)
++#endif
+       timestamp = 0;
+     else
+       timestamp -= demux->start_time;
+@@ -1655,6 +1988,7 @@ read_failed:
+     else if (gst_ffmpegdemux_has_outputted (demux)
+         || gst_ffmpegdemux_is_eos (demux)) {
+       GST_DEBUG_OBJECT (demux, "We are EOS");
++      GST_ERROR_OBJECT (demux, "We are EOS outputted: %d  _is_eos: %d", gst_ffmpegdemux_has_outputted (demux), gst_ffmpegdemux_is_eos (demux));
+       ret = GST_FLOW_EOS;
+     } else
+       ret = GST_FLOW_ERROR;
+@@ -2028,9 +2362,17 @@ gst_ffmpegdemux_register (GstPlugin * plugin)
+
+     /* no emulators */
+     if (in_plugin->long_name != NULL) {
+-      if (!strncmp (in_plugin->long_name, "raw ", 4) ||
++#ifdef TCL_PATCH
++      if ((!strncmp (in_plugin->long_name, "raw ", 4) &&
++            strncmp (in_plugin->name, "avs2", 4) &&
++            strncmp (in_plugin->name, "cavsvideo", 9)) ||
++          !strncmp (in_plugin->long_name, "pcm ", 4)
++          )
++#else
++     if (!strncmp (in_plugin->long_name, "raw ", 4) ||
+           !strncmp (in_plugin->long_name, "pcm ", 4)
+           )
++#endif
+         continue;
+     }
+
+@@ -2079,11 +2421,15 @@ gst_ffmpegdemux_register (GstPlugin * plugin)
+         !strcmp (in_plugin->name, "matroska") ||
+         !strcmp (in_plugin->name, "matroska_webm") ||
+         !strcmp (in_plugin->name, "matroska,webm") ||
++#ifndef TCL_PATCH
+         !strcmp (in_plugin->name, "mpeg") ||
++#endif
+         !strcmp (in_plugin->name, "wav") ||
+         !strcmp (in_plugin->name, "au") ||
+         !strcmp (in_plugin->name, "tta") ||
++#ifndef TCL_PATCH
+         !strcmp (in_plugin->name, "rm") ||
++#endif
+         !strcmp (in_plugin->name, "amr") ||
+         !strcmp (in_plugin->name, "ogg") ||
+         !strcmp (in_plugin->name, "aiff") ||
+@@ -2129,6 +2475,9 @@ gst_ffmpegdemux_register (GstPlugin * plugin)
+         !strcmp (in_plugin->name, "mxf") ||
+         !strcmp (in_plugin->name, "mmf") ||
+         !strcmp (in_plugin->name, "mm") ||
++#ifdef TCL_PATCH
++        !strcmp (in_plugin->name, "rm") ||
++#endif
+         !strcmp (in_plugin->name, "ipmovie") ||
+         !strcmp (in_plugin->name, "ape") ||
+         !strcmp (in_plugin->name, "RoQ") ||
+@@ -2138,6 +2487,10 @@ gst_ffmpegdemux_register (GstPlugin * plugin)
+         !strcmp (in_plugin->name, "ea") ||
+         !strcmp (in_plugin->name, "daud") ||
+         !strcmp (in_plugin->name, "avs") ||
++#ifdef TCL_PATCH
++        !strcmp (in_plugin->name, "avs2") ||
++        !strcmp (in_plugin->name, "cavsvideo") ||
++#endif
+         !strcmp (in_plugin->name, "aiff") ||
+         !strcmp (in_plugin->name, "xwma") ||
+         !strcmp (in_plugin->name, "4xm") ||
+@@ -2151,6 +2504,12 @@ gst_ffmpegdemux_register (GstPlugin * plugin)
+         !strcmp (in_plugin->name, "gif") ||
+         !strcmp (in_plugin->name, "dsf") || !strcmp (in_plugin->name, "iff"))
+       rank = GST_RANK_MARGINAL;
++#ifdef TCL_PATCH
++    else if (!strcmp (in_plugin->name, "mpeg")) {
++     GST_INFO ("libav demuxer plugin %s [%s]", in_plugin->name, in_plugin->long_name);
++      rank = GST_RANK_PRIMARY - 1;
++             }
++#endif
+     else {
+       GST_DEBUG ("ignoring %s", in_plugin->name);
+       rank = GST_RANK_NONE;
+diff --git a/subprojects/gst-libav/ext/libav/gstavprotocol.c b/subprojects/gst-libav/ext/libav/gstavprotocol.c
+index 249b240642..a6d56a6184 100644
+--- a/subprojects/gst-libav/ext/libav/gstavprotocol.c
++++ b/subprojects/gst-libav/ext/libav/gstavprotocol.c
+@@ -233,7 +233,12 @@ int
+ gst_ffmpegdata_open (GstPad * pad, int flags, AVIOContext ** context)
+ {
+   GstProtocolInfo *info;
++
++#ifdef TCL_PATCH
++  static const int buffer_size = 4096 * 16;
++#else
+   static const int buffer_size = 4096;
++#endif
+   unsigned char *buffer = NULL;
+
+   info = g_new0 (GstProtocolInfo, 1);
+--
+2.25.1
+
